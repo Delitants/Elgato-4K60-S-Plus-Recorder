@@ -1,0 +1,30 @@
+NDI runtime terms
+
+These terms apply only to the proprietary NDI SDK/runtime and its protocols,
+not to the separately licensed application, MIT NDI sender source, FFmpeg,
+or other open-source components. Their licenses remain in effect.
+Copyright NDI, Inc. All rights reserved. Preserve the additional copyright
+notices included in libndi_licenses.txt and the runtime itself.
+NDI® is a registered trademark of Vizrt NDI AB. https://ndi.video
+
+Use of the bundled NDI runtime is subject to the included NDI Technology
+License Agreement (NDI-SDK-License.pdf), including its section 3(d):
+- Do not modify the NDI SDK, Specific SDK, NDI Products, or any part of them.
+- Do not reverse engineer, disassemble, recompile, or attempt to do so to
+  the NDI SDK, Specific SDK, NDI Products, or their internal or external
+  protocols, whether transmitted over a network or used on a machine.
+- Do not circumvent technical limitations of those NDI components.
+- Do not remove, obscure, or alter their proprietary notices or labels.
+- NDI and its licensors disclaim all warranties.
+- To the extent permitted by applicable law, NDI and its licensors disclaim
+  liability for direct, indirect, incidental, or consequential damages arising
+  from use of this product or the bundled products.
+- Comply with relevant United States export laws and regulations; do not
+  directly or indirectly export the bundled products in violation of them.
+- Third-party developers using this product to develop products using NDI
+  must comply with the NDI SDK license, maintain current and complete NDI
+  compatibility, and include the terms required by section 3(d) in their EULA.
+
+The full included NDI agreement governs the NDI components. These restrictions
+do not limit rights granted by the GPL, LGPL, BSD, or MIT licenses to components
+covered by those licenses. This project is not sponsored or endorsed by NDI.

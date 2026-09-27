@@ -1,0 +1,40 @@
+Elgato Recorder 0.3.0 component notices
+
+Native application / USB initialization: GPL-2.0
+https://github.com/Saddytech/elgato4k60sp-linux
+See the root LICENSE. The USB sequence is adapted from that project.
+
+libusb 1.0.30: LGPL-2.1-or-later
+https://libusb.info — libusb-COPYING.txt, libusb-AUTHORS.txt
+Dynamically linked. A replacement library can be installed in Contents/Frameworks
+and the app re-signed with an ad-hoc identity; no private signing key is required.
+
+Standalone MediaHelper and FFmpeg 8.1.2: GPL-3.0-or-later
+https://ffmpeg.org — FFmpeg-GPL-3.0.txt
+FFmpeg configured with GPL/version3, libx264, libx265, SVT-AV1, Opus, and the native
+Apple multimedia frameworks. Matching dependency source accompanies the release.
+
+x264: GPL-2.0-or-later — https://www.videolan.org/developers/x264.html
+ARM: r3222 b35605ace3ddf7c1a5d67a2eb553f034aef41d55, Homebrew recipe included.
+Intel: r3106 eaa68fa, public OBS dependencies 2026-08-26; its build recipes are
+included in the accompanying source archive. See x264-COPYING.txt.
+
+x265: GPL-2.0-or-later — https://bitbucket.org/multicoreware/x265_git
+ARM 4.2; Intel 4.3 with linked 8-bit/10-bit builds. See x265-COPYING.txt.
+
+SVT-AV1 4.2.0: BSD-3-Clause-Clear, BSD-2-Clause components and patent license
+https://gitlab.com/AOMediaCodec/SVT-AV1 — LICENSE-BSD2.md / LICENSE.md and patent
+materials supplied alongside the source archive, as applicable.
+
+Opus 1.6.1: BSD-style license and patent grants
+https://opus-codec.org — Opus-COPYING.txt; full notices in the source archive.
+
+NDISender and NDI public headers: MIT. See Helpers/NDI/LICENSE.txt and header notices.
+NDI runtime 6.3.2.0.260413: proprietary, Copyright NDI, Inc. and its licensors.
+See NDI-RUNTIME-TERMS.txt, NDI-SDK-License.pdf, and libndi_licenses.txt.
+https://ndi.video
+NDI® is a registered trademark of Vizrt NDI AB. No endorsement is implied.
+The proprietary runtime is loaded only by the separate NDISender executable.
+
+Original Homebrew formulas are included in dependency-build-recipes. See
+BUILD.md and the release's corresponding-source archive for build instructions.
