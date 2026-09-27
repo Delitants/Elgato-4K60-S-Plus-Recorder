@@ -1,4 +1,4 @@
-Elgato Recorder 0.3.0 component notices
+Elgato Recorder 0.4.0 component notices
 
 Native application / USB initialization: GPL-2.0
 https://github.com/Saddytech/elgato4k60sp-linux

@@ -88,7 +88,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
         for view in [top,preview,info,controls,folderLabel,stats]{view.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive=true}
         preview.setContentHuggingPriority(.defaultLow,for:.vertical)
         window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
-        // Match 60 fps capture and keep drawing while menus/controls track input.
+        // Poll for newly selected frames up to 60 Hz. snapshot consumes each frame once;
+        // a 30 fps source or output therefore draws only 30 new video frames/s.
         timer=Timer(timeInterval:1.0/60,repeats:true){[weak self]_ in self?.refresh()}
         RunLoop.main.add(timer!,forMode:.common)
         engine.connect()

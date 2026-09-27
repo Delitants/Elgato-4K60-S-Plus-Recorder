@@ -3,6 +3,7 @@ import CoreMedia
 final class RecordingSink {
  private let queue=DispatchQueue(label:"Elgato.Recording",qos:.userInitiated),lock=NSLock(),budget=QueueBudget()
  private let converter:MediaConverter,decoder=PreviewDecoder(),native:MovieRecorder?,helper:MediaHelperClient?
+ private var recordingRate:VideoRate?
  private var failure:Error?,ended=false,frames=0,elapsed=0.0,origin:UInt64?
  let url:URL
  var duration:Double{lock.lock();defer{lock.unlock()};return elapsed}
@@ -10,7 +11,7 @@ final class RecordingSink {
  var dropped:Int{0}
  var error:Error?{lock.lock();defer{lock.unlock()};return failure}
  private let profile:RecordingProfile
- init(url:URL,profile:RecordingProfile){self.url=url;self.profile=profile;converter=MediaConverter(hevc:profile.captureHEVC);decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC
+ init(url:URL,profile:RecordingProfile,initialRate:VideoRate?=nil){self.url=url;self.profile=profile;converter=MediaConverter(hevc:profile.captureHEVC,initialRate:initialRate);decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC
   native=profile.usesHelper ? nil:MovieRecorder(url:url,profile:profile);helper=profile.usesHelper ? MediaHelperClient(url:url,profile:profile):nil
  }
  func offer(_ frame:DeviceFrame)->Bool{
@@ -19,7 +20,11 @@ final class RecordingSink {
   queue.async{defer{self.budget.release(bytes:frame.data.count)}
    do {
     guard self.error==nil,let(sample,key)=try self.converter.convert(frame) else{return}
-    if let helper=self.helper {try helper.append(sample,type:frame.type,key:key)}
+    if frame.type==0xc1,let rate=self.converter.frameTiming.rate {
+     if let previous=self.recordingRate,abs(previous.fps-rate.fps)/previous.fps>0.01 {throw RecorderError(message:"Incoming frame rate changed. Start a new recording for the new signal.")}
+     if self.recordingRate==nil && key {self.recordingRate=rate}
+    }
+    if let helper=self.helper {guard try helper.append(sample,type:frame.type,key:key) else{return}}
     else if let native=self.native {
      if frame.type==0xc1 && self.profile.transcodes{self.decoder.decode(sample,key:key,synchronous:true);if let error=self.decoder.lastError{throw RecorderError(message:error)};if let image=self.decoder.takeFrame(){try native.append(image,type:frame.type,key:key,converter:self.converter)}}
      else{try native.append(sample,type:frame.type,key:key,converter:self.converter)}

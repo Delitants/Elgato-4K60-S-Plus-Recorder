@@ -44,3 +44,19 @@ The default remains 1920×1080; an automatic source-matching option must wait fo
 validated input-status decoding. Never infer input size from this encoder setting.
 Elgato documents source-matched recording in standalone SD-card mode:
 https://help.elgato.com/hc/en-us/articles/360038597431-Elgato-Game-Capture-4K60-S-Supported-Resolutions
+
+## Frame timing (0.4.0)
+
+Incoming FPS is inferred from the device's timestamp timeline, independently of
+USB arrival bursts. Regression fitting tolerates alternating short/long intervals;
+isolated gaps use the prior measured period for missing-frame accounting. This
+measures the encoded stream, not physical HDMI timing. The reference USB encoder
+timing bytes remain unchanged because arbitrary replacements are unverified.
+A manual source-FPS override limits downstream processing when the encoder repeats
+frames. Output downsampling acts only on decoded video, never compressed reference
+packets. Audio timestamps and samples are preserved.
+
+NDISender's internal header is now 32 bytes: type/size/width/height uint32, signed
+PTS microseconds int64, FPS numerator/denominator uint32, all little-endian. Video
+requires a positive rate; audio has zero FPS fields. The app and helper must be
+updated together. Legacy 24-byte sender messages are not compatible.

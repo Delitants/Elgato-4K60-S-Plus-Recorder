@@ -80,7 +80,24 @@ final class CaptureEngine {
         if profile.ndiEnabled{do{ndi=try NDIOutput(profile:profile)}catch{change{$0.ndiStatus=error.localizedDescription}}}
         let ndiOutput=ndi
         let decoder=PreviewDecoder();decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC
-        decoder.onFrame={ [weak self] sample in ndiOutput?.offerVideo(sample);guard let self else{return};self.lock.lock();if self.videoPreview { self.latest=sample };self.lock.unlock() }
+        var previewSelector=FrameSelector()
+        decoder.onFrame={ [weak self] sample in
+            guard let self,let incoming=VideoRate.measured(period:CMSampleBufferGetDuration(sample).seconds) else{return}
+            let effective=profile.effectiveRate(incoming:incoming)
+            var output=sample
+            self.lock.lock()
+            if effective.fps<incoming.fps-0.01 {
+                let pts=CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value
+                guard let selected=previewSelector.select(timestamp:pts,rate:effective) else{self.lock.unlock();return}
+                var timing=CMSampleTimingInfo(duration:effective.duration,presentationTimeStamp:CMTime(value:selected,timescale:1_000_000),decodeTimeStamp:.invalid)
+                var adjusted:CMSampleBuffer?
+                if CMSampleBufferCreateCopyWithNewTiming(allocator:kCFAllocatorDefault,sampleBuffer:sample,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleBufferOut:&adjusted)==noErr,let adjusted{output=adjusted}
+                else{self.lock.unlock();return}
+            }
+            if self.videoPreview {self.latest=output}
+            self.lock.unlock()
+            ndiOutput?.offerVideo(output)
+        }
         let monitor=AudioMonitor()
         let timing=CaptureTiming()
         var deadline=RecordingDeadline()
@@ -99,7 +116,7 @@ final class CaptureEngine {
             if stop || deadline.expired(now:ProcessInfo.processInfo.systemUptime),let r=recorder{finish(r);recorder=nil;deadline.clear()}
             if stop && recorder==nil {change{$0.recording=false}}
             if let url,!stop,recorder==nil {
-                recorder=RecordingSink(url:url,profile:profile)
+                recorder=RecordingSink(url:url,profile:profile,initialRate:converter.frameTiming.rate)
                 deadline.start(seconds:limit,now:ProcessInfo.processInfo.systemUptime)
                 change{$0.recording=true;$0.seconds=0;$0.status="Waiting for keyframe…";$0.detail="Recording will begin on the next video keyframe."}
             }
@@ -149,7 +166,11 @@ final class CaptureEngine {
                     s.remaining=deadline.remaining(now:ProcessInfo.processInfo.systemUptime)
                     if let format=converter.videoFormat {let d=CMVideoFormatDescriptionGetDimensions(format);let transfer=CMFormatDescriptionGetExtension(format,extensionKey:kCMFormatDescriptionExtension_TransferFunction) as? String
                         let color=transfer == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String) ? "HDR PQ" : transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String) ? "HDR HLG" : "HDR not signalled"
-                        s.format="Encoded \(d.width) × \(d.height) · \(profile.captureHEVC ? "HEVC Main 10" : "H.264") · ~60 fps · \(color)"}
+                        let rateText=converter.frameTiming.rate.map { incoming in
+                            let effective=profile.effectiveRate(incoming:incoming)
+                            return "Incoming \(incoming.label) fps · Output \(effective.label) fps"+(profile.sourceFPS == .source ? "" : " · source override")
+                        } ?? "Measuring incoming FPS…"
+                        s.format="Encoded \(d.width) × \(d.height) · \(profile.captureHEVC ? "HEVC Main 10" : "H.264") · \(rateText) · \(color)"}
                     if stale{s.status="Waiting for HDMI…";s.detail="No recent video. Check the source and HDMI cable."}
                     else if let r=recorder,r.videoFrames>0{s.status="Recording";s.detail="Saving video and HDMI audio to \(profile.fileExtension.uppercased())."}
                     else if recorder==nil && s.status=="Waiting for HDMI…"{s.status="Live preview";s.detail="Ready to record video and HDMI audio."}

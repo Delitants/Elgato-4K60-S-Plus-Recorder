@@ -35,26 +35,36 @@ class Recorder {
  AVCodecContext *dec=nullptr,*ve=nullptr,*ae=nullptr; AVFormatContext*out=nullptr;
  AVStream *vs=nullptr,*as=nullptr; SwsContext*scaler=nullptr; SwrContext*resampler=nullptr;AVAudioFifo*fifo=nullptr;
  AVBufferRef*hw=nullptr;vector<uint8_t>extra; map<int64_t,AVPacket*> pending; int part=0;int64_t origin=0,audioNext=AV_NOPTS_VALUE,lastV=-1,lastA=-1;bool started=false;
- int width=0,height=0; string output; bool copy; int64_t segmentStart=0,segmentPayloadBytes=0; bool splitPending=false;
+ AVRational sourceRate={0,1},outputRate={0,1};int64_t selectionOrigin=AV_NOPTS_VALUE,lastSlot=-1;
+ int width=0,height=0; string output; bool copy; int64_t segmentStart=0,segmentPayloadBytes=0; bool splitPending=false,splitReady=false;
  static AVPixelFormat hardwareFormat(AVCodecContext*c,const AVPixelFormat*fmts){for(auto p=fmts;*p!=AV_PIX_FMT_NONE;++p)if(*p==AV_PIX_FMT_VIDEOTOOLBOX)return *p;return num("decoder")==1?AV_PIX_FMT_NONE:fmts[0];}
  void packet(AVCodecContext*c,AVStream*s){AVPacket*p=av_packet_alloc();while(true){int r=avcodec_receive_packet(c,p);if(r==AVERROR(EAGAIN)||r==AVERROR_EOF)break;ck(r,"Receive encoded packet");av_packet_rescale_ts(p,c->time_base,s->time_base);p->stream_index=s->index;segmentPayloadBytes+=p->size;ck(av_interleaved_write_frame(out,p),"Write packet");}av_packet_free(&p);}
  void audioFrames(bool drain){if(!ae)return;int frameSize=ae->frame_size?ae->frame_size:1024;while(av_audio_fifo_size(fifo)>=frameSize || (drain&&av_audio_fifo_size(fifo)>0)){int n=min(frameSize,av_audio_fifo_size(fifo));AVFrame*f=av_frame_alloc();f->format=ae->sample_fmt;f->sample_rate=ae->sample_rate;av_channel_layout_copy(&f->ch_layout,&ae->ch_layout);f->nb_samples=n;ck(av_frame_get_buffer(f,0),"Audio frame");av_audio_fifo_read(fifo,(void**)f->data,n);f->pts=audioNext;audioNext+=n;ck(avcodec_send_frame(ae,f),"Encode audio");av_frame_free(&f);packet(ae,as);}}
+ void configureRate(){
+  if(sourceRate.num)return;
+  sourceRate={num("sourceN",dec->framerate.num),num("sourceD",dec->framerate.den)};
+  outputRate={num("fpsN",sourceRate.num),num("fpsD",sourceRate.den)};
+  for(auto r:{sourceRate,outputRate})if(r.num<=0||r.den<=0||av_q2d(r)<1||av_q2d(r)>240)throw runtime_error("Valid source and output frame rates are required");
+  if(av_cmp_q(outputRate,sourceRate)>0)outputRate=sourceRate;
+  if(copy && av_cmp_q(outputRate,sourceRate)<0)throw runtime_error("FPS downsampling requires a video encoder; Original video cannot drop compressed frames");
+ }
  void openOutput(AVFrame*source,int64_t pts){
   origin=pts;segmentStart=pts;segmentPayloadBytes=0;audioNext=AV_NOPTS_VALUE;
   string path=opt("output");if(num("split")!=0){filesystem::path p(path);char suffix[32];snprintf(suffix,sizeof(suffix),"_part%03d",++part);path=(p.parent_path()/(p.stem().string()+suffix+p.extension().string())).string();}
   if(filesystem::exists(path))throw runtime_error("Output already exists: "+path);
   ck(avformat_alloc_output_context2(&out,nullptr,nullptr,path.c_str()),"Create container");output=path;
   vs=avformat_new_stream(out,nullptr);if(!vs)throw runtime_error("Allocate video stream");
+  vs->avg_frame_rate=outputRate;vs->r_frame_rate=outputRate;
   if(copy){ck(avcodec_parameters_from_context(vs->codecpar,dec),"Copy source format");vs->codecpar->codec_tag=0;vs->time_base=US;}
   else {
    string codec=opt("video","h264_videotoolbox");const AVCodec*c=avcodec_find_encoder_by_name(codec.c_str());if(!c)throw runtime_error("Encoder unavailable: "+codec);ve=avcodec_alloc_context3(c);
    int target=num("height",source->height);ve->height=min(source->height,target);ve->width=(source->width*ve->height/source->height)/2*2;
-   ve->time_base={1,60000};ve->framerate={60000,1001};ve->sample_aspect_ratio=source->sample_aspect_ratio;
+   ve->time_base=US;ve->framerate=outputRate;ve->sample_aspect_ratio=source->sample_aspect_ratio;
    bool ten=opt("profile")=="main10" || (source->format==AV_PIX_FMT_YUV420P10LE && codec=="libsvtav1");
    ve->pix_fmt=codec.find("prores")!=string::npos ? AV_PIX_FMT_P210LE : ten?(codec.find("videotoolbox")!=string::npos?AV_PIX_FMT_P010LE:AV_PIX_FMT_YUV420P10LE):AV_PIX_FMT_YUV420P;
    ve->color_primaries=source->color_primaries;ve->color_trc=source->color_trc;ve->colorspace=source->colorspace;ve->color_range=source->color_range;
    if(source->color_trc==AVCOL_TRC_SMPTE2084||source->color_trc==AVCOL_TRC_ARIB_STD_B67)throw runtime_error("HDR transcoding is not validated. Use Original video.");
-   string rc=opt("rc","abr");ve->bit_rate=rc=="crf"?0:num("bitrate",20000000);int key=num("key");if(key>0)ve->gop_size=max(1,key*60000/1001);
+   string rc=opt("rc","abr");ve->bit_rate=rc=="crf"?0:num("bitrate",20000000);int key=num("key");if(key>0)ve->gop_size=max(1,int(av_rescale_q(key,{1,1},av_inv_q(outputRate))));
    ve->max_b_frames=num("bframes");if(out->oformat->flags&AVFMT_GLOBALHEADER)ve->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
    AVDictionary*d=nullptr;auto set=[&](string k,string v){av_dict_set(&d,k.c_str(),v.c_str(),0);};
    if(rc=="crf")set("crf",opt("quality","23"));
@@ -97,12 +107,24 @@ class Recorder {
  }
  void finishSegment(){if(!out)return;if(ve){ck(avcodec_send_frame(ve,nullptr),"Drain video");packet(ve,vs);}audioFrames(true);if(ae){ck(avcodec_send_frame(ae,nullptr),"Drain audio");packet(ae,as);}ck(av_write_trailer(out),"Finalize container");avio_closep(&out->pb);avformat_free_context(out);out=nullptr;avcodec_free_context(&ve);avcodec_free_context(&ae);swr_free(&resampler);av_audio_fifo_free(fifo);fifo=nullptr;started=false;cout<<"SAVED "<<output<<endl;}
  void videoFrame(AVFrame*src,int64_t pts,bool key,AVPacket*input){
+  configureRate();
+  if(started&&num("split")){
+   int64_t bytes=max(avio_tell(out->pb),segmentPayloadBytes);
+   if((num("split")==1&&pts-segmentStart>=int64_t(num("splitValue"))*1000000)||(num("split")==2&&bytes>=int64_t(num("splitValue"))*1000000))splitPending=true;
+   if(splitPending&&key)splitReady=true;
+  }
+  if(!copy && av_cmp_q(outputRate,sourceRate)<0){
+   if(selectionOrigin==AV_NOPTS_VALUE)selectionOrigin=pts;
+   int64_t slot=av_rescale_q_rnd(pts-selectionOrigin+1,US,av_inv_q(outputRate),AV_ROUND_DOWN);
+   if(slot<=lastSlot){flushAudioUntil(pts);return;}
+   lastSlot=slot;pts=selectionOrigin+av_rescale_q(slot,av_inv_q(outputRate),US);
+  }
   AVFrame*cpu=nullptr;if(!copy && src->format==AV_PIX_FMT_VIDEOTOOLBOX){cpu=av_frame_alloc();ck(av_hwframe_transfer_data(cpu,src,0),"Download decoded frame");av_frame_copy_props(cpu,src);src=cpu;}
   if(width && (src->width!=width||src->height!=height))throw runtime_error("HDMI format changed; start a new recording");width=src->width;height=src->height;
-  if(started&&num("split")){int64_t bytes=max(avio_tell(out->pb),segmentPayloadBytes);if((num("split")==1&&pts-segmentStart>=int64_t(num("splitValue"))*1000000)||(num("split")==2&&bytes>=int64_t(num("splitValue"))*1000000))splitPending=true;if(splitPending&&key){flushAudioUntil(pts);finishSegment();splitPending=false;}}
+  if(splitReady){flushAudioUntil(pts);finishSegment();splitPending=false;splitReady=false;key=true;}
   if(!started){if(!key){av_frame_free(&cpu);return;}openOutput(src,pts);}
   flushAudioUntil(pts);
-  if(copy){AVPacket*p=av_packet_clone(input);if(key)p->flags|=AV_PKT_FLAG_KEY;p->pts=p->dts=pts-origin;p->duration=16683;av_packet_rescale_ts(p,US,vs->time_base);p->stream_index=vs->index;segmentPayloadBytes+=p->size;ck(av_interleaved_write_frame(out,p),"Write original video");av_packet_free(&p);}
+  if(copy){AVPacket*p=av_packet_clone(input);if(key)p->flags|=AV_PKT_FLAG_KEY;p->pts=p->dts=pts-origin;p->duration=av_rescale_q(1,av_inv_q(sourceRate),US);av_packet_rescale_ts(p,US,vs->time_base);p->stream_index=vs->index;segmentPayloadBytes+=p->size;ck(av_interleaved_write_frame(out,p),"Write original video");av_packet_free(&p);}
   else {int flags=SWS_BICUBIC;string f=opt("filter");if(f=="bilinear")flags=SWS_BILINEAR;else if(f=="area")flags=SWS_AREA;else if(f=="lanczos")flags=SWS_LANCZOS;
    scaler=sws_getCachedContext(scaler,src->width,src->height,(AVPixelFormat)src->format,ve->width,ve->height,ve->pix_fmt,flags,nullptr,nullptr,nullptr);if(!scaler)throw runtime_error("Scaler unavailable");
    AVFrame*dst=av_frame_alloc();dst->format=ve->pix_fmt;dst->width=ve->width;dst->height=ve->height;ck(av_frame_get_buffer(dst,32),"Allocate video frame");sws_scale(scaler,src->data,src->linesize,0,src->height,dst->data,dst->linesize);av_frame_copy_props(dst,src);dst->pts=av_rescale_q(pts-origin,US,ve->time_base);dst->pict_type=AV_PICTURE_TYPE_NONE;

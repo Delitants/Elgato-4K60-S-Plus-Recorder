@@ -13,7 +13,7 @@ clang++ -arch "$ARCH" -mmacosx-version-min=26.0 -std=c++17 -O2 -IHelpers/NDI/inc
 cp Dependencies/NDI/libndi.dylib "$APP_DIR/Contents/Frameworks/"
 clang++ -arch "$ARCH" -mmacosx-version-min=26.0 -std=c++17 -O2 Helpers/Media/main.cpp $(pkg-config --cflags --libs libavformat libavcodec libavutil libswscale libswresample) -o "$APP_DIR/Contents/MacOS/MediaHelper"
 clang -arch "$ARCH" -O2 -Wall -Wextra -mmacosx-version-min=26.0 -I"$USB_PREFIX/include/libusb-1.0" -c Sources/USBBridge.c -o "$BUILD_DIR/USBBridge.o"
-xcrun swiftc -O -target "$ARCH-apple-macosx26.0" -module-cache-path "$BUILD_DIR/module-cache" -import-objc-header Sources/USBBridge.h Sources/Completion.swift Sources/NDIOutput.swift Sources/CaptureFanout.swift Sources/MediaHelperClient.swift Sources/RecordingSink.swift Sources/Profiles.swift Sources/PacketParser.swift Sources/Media.swift Sources/Monitoring.swift Sources/CaptureEngine.swift Sources/Settings.swift Sources/App.swift "$BUILD_DIR/USBBridge.o" -L"$USB_PREFIX/lib" -lusb-1.0 -Xlinker -rpath -Xlinker @executable_path/../Frameworks -o "$APP_DIR/Contents/MacOS/ElgatoRecorder"
+xcrun swiftc -O -target "$ARCH-apple-macosx26.0" -module-cache-path "$BUILD_DIR/module-cache" -import-objc-header Sources/USBBridge.h Sources/Completion.swift Sources/NDIOutput.swift Sources/CaptureFanout.swift Sources/MediaHelperClient.swift Sources/RecordingSink.swift Sources/FrameTiming.swift Sources/Profiles.swift Sources/PacketParser.swift Sources/Media.swift Sources/Monitoring.swift Sources/CaptureEngine.swift Sources/Settings.swift Sources/App.swift "$BUILD_DIR/USBBridge.o" -L"$USB_PREFIX/lib" -lusb-1.0 -Xlinker -rpath -Xlinker @executable_path/../Frameworks -o "$APP_DIR/Contents/MacOS/ElgatoRecorder"
 if [ -f "$APP_DIR/Contents/Frameworks/libusb-1.0.0.dylib" ]; then chmod u+w "$APP_DIR/Contents/Frameworks/libusb-1.0.0.dylib"; fi
 cp "$USB_PREFIX/lib/libusb-1.0.0.dylib" "$APP_DIR/Contents/Frameworks/"
 install_name_tool -id @rpath/libusb-1.0.0.dylib "$APP_DIR/Contents/Frameworks/libusb-1.0.0.dylib"
@@ -29,8 +29,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>Elgato Recorder</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>Recorder</string>
-<key>CFBundleShortVersionString</key><string>0.3.0</string>
-<key>CFBundleVersion</key><string>4</string>
+<key>CFBundleShortVersionString</key><string>0.4.0</string>
+<key>CFBundleVersion</key><string>5</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSHumanReadableCopyright</key><string>GPL-2.0. USB capture sequence adapted from Saddytech/elgato4k60sp-linux.</string>

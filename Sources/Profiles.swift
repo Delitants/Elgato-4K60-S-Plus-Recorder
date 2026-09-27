@@ -7,6 +7,7 @@ enum ScalingFilter:String,Codable,CaseIterable {case disabled,bilinear,area,bicu
 enum AQMode:String,Codable,CaseIterable {case auto,enabled,disabled}
 struct RecordingProfile:Codable {
     var capture4K=false, captureHEVC=false
+    var sourceFPS=FrameRateChoice.source, outputFPS=FrameRateChoice.source
     var deviceMbps=40
     var container=0 // MOV, MP4
     var codec=0 // Original, H.264, HEVC, ProRes 422
@@ -24,7 +25,7 @@ struct RecordingProfile:Codable {
     var splitMode=0, splitSeconds=600, splitMB=1024
     var ndiEnabled=false, ndiName="Elgato Recorder", ndiScale=1
     var fileExtension:String { ["mov","mp4","mkv","ts"][min(3,max(0,container))] }
-    var usesHelper:Bool {container>=2 || codec==4 || audio>=3 || rateControl != .abr || keyframeSeconds != 0 || bFrames != 0 || videoProfile != "auto" || preset != "auto" || spatialAQ != .auto || (scale != 0 && scalingFilter != .bicubic) || splitMode != 0}
+    var usesHelper:Bool {sourceFPS != .source || outputFPS != .source || container>=2 || codec==4 || audio>=3 || rateControl != .abr || keyframeSeconds != 0 || bFrames != 0 || videoProfile != "auto" || preset != "auto" || spatialAQ != .auto || (scale != 0 && scalingFilter != .bicubic) || splitMode != 0}
 
     var transcodes:Bool { codec != 0 }
     func validate() throws {
@@ -59,9 +60,11 @@ struct RecordingProfile:Codable {
         try require((0...2).contains(ndiScale) && !ndiName.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,"Choose an NDI name and valid output resolution.")
     }
     init() {}
-    enum CodingKeys:String,CodingKey {case capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,keyframeSeconds,bFrames,videoProfile,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
+    enum CodingKeys:String,CodingKey {case sourceFPS,outputFPS,capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,keyframeSeconds,bFrames,videoProfile,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
     init(from sourceDecoder:Decoder)throws {
         let c=try sourceDecoder.container(keyedBy:CodingKeys.self)
+        sourceFPS=try c.decodeIfPresent(FrameRateChoice.self,forKey:.sourceFPS) ?? .source
+        outputFPS=try c.decodeIfPresent(FrameRateChoice.self,forKey:.outputFPS) ?? .source
         capture4K=try c.decodeIfPresent(Bool.self,forKey:.capture4K) ?? capture4K
         captureHEVC=try c.decodeIfPresent(Bool.self,forKey:.captureHEVC) ?? captureHEVC
         deviceMbps=try c.decodeIfPresent(Int.self,forKey:.deviceMbps) ?? deviceMbps
@@ -90,7 +93,10 @@ struct RecordingProfile:Codable {
         ndiName=try c.decodeIfPresent(String.self,forKey:.ndiName) ?? ndiName
         ndiScale=try c.decodeIfPresent(Int.self,forKey:.ndiScale) ?? ndiScale
     }
-    func videoSettings(format:CMVideoFormatDescription) throws -> [String:Any]? {
+    func effectiveRate(incoming:VideoRate)->VideoRate {
+        [incoming,sourceFPS.rate,outputFPS.rate].compactMap{$0}.min(by:{$0.fps<$1.fps})!
+    }
+    func videoSettings(format:CMVideoFormatDescription,frameRate:Double?=nil) throws -> [String:Any]? {
         guard transcodes else { return nil }
         let dimensions=CMVideoFormatDescriptionGetDimensions(format)
         let targetHeight=scale==1 ? 1080 : scale==2 ? 720 : Int(dimensions.height)
@@ -101,6 +107,7 @@ struct RecordingProfile:Codable {
         if hdr { throw RecorderError(message:"Use Original video for HDR preservation. HDR transcoding and tone mapping are not yet validated.") }
         let type:AVVideoCodecType=codec==1 ? .h264 : codec==2 ? .hevc : .proRes422
         var compression:[String:Any]=[:]
+        if let frameRate {compression[AVVideoExpectedSourceFrameRateKey]=frameRate}
         if codec != 3 { compression[AVVideoAverageBitRateKey]=videoMbps*1_000_000;compression[AVVideoAllowFrameReorderingKey]=false }
         var spec:[String:Any]=[kVTVideoEncoderSpecification_EnableHardwareAcceleratedVideoEncoder as String:encoder != 2]
         if encoder==1 { spec[kVTVideoEncoderSpecification_RequireHardwareAcceleratedVideoEncoder as String]=true }

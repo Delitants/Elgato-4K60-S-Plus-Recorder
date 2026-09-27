@@ -8,6 +8,8 @@ experimental support for a device that Elgato does not officially support on mac
 
 ![Native recording settings](docs/images/recording-settings.png)
 
+The screenshot shows the 0.3 settings layout; 0.4 adds the FPS controls described below.
+
 ## Install
 
 Requires **macOS 26 or later**. Choose **arm64** for Apple Silicon or **x86_64** for
@@ -39,8 +41,7 @@ supported by this device; select stereo PCM on the source.
 1080p, and 3840×2160 only for a 4K source. This release requests encoder dimensions
 manually; it does **not** detect the physical HDMI input resolution automatically.
 The displayed **Encoded** resolution describes the incoming compressed stream,
-not an independently measured HDMI input. Capture timing is currently nominal
-60/59.94 fps; other source rates are not validated.
+not an independently measured HDMI input. Frame rate follows measured incoming timestamps; see the FPS controls below.
 
 Video and audio preview toggles are independent of recording. Monitoring volume
 only affects playback through the Mac. Audio uses a bounded, preallocated ring
@@ -51,6 +52,31 @@ load, preview may skip or resynchronize rather than grow an unbounded delay.
 **Stop after** takes `hh:mm:ss`. Its monotonic wall-clock timer begins when Record
 is pressed, including time waiting for the first keyframe or a lost HDMI signal.
 The media file can therefore be shorter than the timer interval.
+
+## Frame rate and downsampling
+
+**Settings → Video → Output FPS** applies to video preview, recording, and NDI.
+The default **Match incoming stream** follows device timestamps. Available caps
+are 15, 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 fps. A 30 fps stream stays
+30 even if a 60 fps cap is selected. Lower caps select frames evenly, preserving
+playback speed and audio. Missing frames remain gaps; no interpolation or frame
+duplication is performed. Resolution scaling is independent of this setting.
+
+The incoming rate is measured over a short timestamp window to tolerate the
+device's timing jitter. The status shows **Incoming** and **Output** FPS instead
+of a hard-coded 60. A substantial sustained incoming-rate change stops an active
+recording so its timing metadata remains consistent; start a new recording.
+
+Physical HDMI input timing is not exposed by a verified USB status field in this
+implementation. If the device repeats a 30 fps HDMI source into a 60 fps encoded
+stream, set **Capture → Source FPS override → 30 fps**. This caps processing at
+the rate you specify; it does not change or verify the device's HDMI input mode.
+A game rendering 30 fps over a 60 Hz HDMI signal still supplies a 60 Hz signal.
+
+**Original device stream** preserves every compressed frame. If the effective
+output rate is lower, recording reports that a video encoder is required; choose
+H.264, HEVC, ProRes or AV1. Preview and NDI can still use the lower rate. Select
+a supported encoder and reduce output resolution/workload if it cannot keep up.
 
 ## Formats and controls
 
@@ -64,6 +90,7 @@ The media file can therefore be shorter than the timer interval.
 | Rate control | ABR; CBR for supported H.264/HEVC paths; software CRF |
 | Compression | Software presets, AV1 effort, ProRes profiles, Opus/FLAC effort |
 | Advanced video | Codec profiles, B-frames, keyframe interval (0 = Auto), spatial AQ |
+| Frame rate | Match incoming stream or explicit FPS cap; manual source override; no upsampling |
 | Downscale | Keep encoded dimensions, 1080p, 720p; Disabled/Bilinear/Area/Bicubic/Lanczos |
 | Splitting | Time or approximate size, at the next source keyframe |
 | OBS output | NDI video and stereo audio; original, 1080p, or 720p SDR |
@@ -78,8 +105,9 @@ AV1 is software-only in this release and may not keep up with real-time 4K60 on
 your CPU. Intel AV1 uses a portable C build and has reduced performance. Required
 hardware modes fail clearly when unavailable. Software ProRes is unavailable.
 
-Splits can exceed their time/size target by a source GOP plus encoder/container
-buffering. Each finalized part starts at a video keyframe; PCM is divided at the
+Splits can exceed their time/size target by a source GOP, one output frame
+interval, and encoder/container buffering. After a source keyframe, a transcode
+split starts on the next selected frame. Each finalized part starts at a video keyframe; PCM is divided at the
 corresponding audio sample. Lossy audio encoders may introduce priming/padding at
 individual segment boundaries. If the recording backend cannot keep up, recording
 stops with an error instead of silently dropping recording frames. Keep any
@@ -116,6 +144,7 @@ bash test-hdr.sh
 MEDIA_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/MediaHelper' bash test-advanced.sh
 NDI_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/NDISender' \
 NDI_RUNTIME='/path/to/Elgato Recorder.app/Contents/Frameworks/libndi.dylib' bash test-ndi.sh
+bash test-fps.sh
 ```
 
 Media fixtures and test recordings use temporary directories and are removed on

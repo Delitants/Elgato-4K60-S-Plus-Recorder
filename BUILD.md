@@ -72,3 +72,10 @@ Defining `CAPTURE_DIAGNOSTICS` when compiling Swift enables a bounded temporary
 `ElgatoRecorder-AudioDiagnostics.json` snapshot with timing and queue counters.
 It contains no captured media and is overwritten every five seconds. Release
 builds omit that flag.
+
+Version 0.4.0 rebuilds FFmpeg with `-mmacosx-version-min=26.0` in both compiler
+and linker flags. All bundled Mach-O minimum OS versions are audited before
+packaging. Version 0.3.0 unintentionally contained FFmpeg dylibs declaring 27.0
+despite the app's 26.0 minimum; use 0.4.0 on macOS 26. Actual runtime testing was
+on macOS 27. `test-fps.sh` checks integer/fractional rates, no upsampling,
+audio continuity, original-stream rejection, and unaligned-keyframe splitting.

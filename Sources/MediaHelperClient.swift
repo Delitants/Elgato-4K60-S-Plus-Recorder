@@ -23,10 +23,12 @@ final class MediaHelperClient {
  }
  var diagnostic:String{stderr?.text ?? ""}
  var lastSavedURL:URL?{guard let path=stdout?.text.split(separator:"\n").last(where:{$0.hasPrefix("SAVED ")}).map({String($0.dropFirst(6))}),FileManager.default.fileExists(atPath:path) else{return nil};return URL(fileURLWithPath:path)}
- func append(_ sample:CMSampleBuffer,type:UInt8,key:Bool)throws {
-  guard let f=CMSampleBufferGetFormatDescription(sample) else{return}
+ func append(_ sample:CMSampleBuffer,type:UInt8,key:Bool)throws -> Bool {
+  guard let f=CMSampleBufferGetFormatDescription(sample) else{return false}
   if !started {
-   guard type==0xc1,key else{return}
+   guard type==0xc1,key,let incoming=VideoRate.measured(period:CMSampleBufferGetDuration(sample).seconds) else{return false}
+   let outputRate=profile.effectiveRate(incoming:incoming)
+   if profile.codec==0 && outputRate.fps<incoming.fps-0.01 {throw RecorderError(message:"FPS downsampling requires H.264, HEVC, ProRes, or AV1. Original video preserves every compressed frame.")}
    let ext=(CMFormatDescriptionGetExtensions(f) as NSDictionary?) ?? NSDictionary()
    guard let atoms=ext[kCMFormatDescriptionExtension_SampleDescriptionExtensionAtoms] as? [String:Any],let extra=atoms[profile.captureHEVC ? "hvcC":"avcC"] as? Data else{throw RecorderError(message:"Missing video codec configuration")}
    let executable=Bundle.main.bundleURL.appendingPathComponent("Contents/MacOS/MediaHelper")
@@ -34,7 +36,7 @@ final class MediaHelperClient {
    let software=profile.encoder==2
    let video=profile.codec==0 ? "copy":profile.codec==4 ? "libsvtav1":profile.codec==3 ? "prores_videotoolbox":profile.codec==1 ? (software ? "libx264":"h264_videotoolbox"):(software ? "libx265":"hevc_videotoolbox")
    let dimensions=CMVideoFormatDescriptionGetDimensions(f)
-   let settings:[String:String]=["output":url.path,"video":video,"audio":["pcm_s16le","aac","alac","libopus","flac"][profile.audio],"hevc":profile.captureHEVC ? "1":"0","encoder":String(profile.encoder),"decoder":String(profile.decoder),"height":String(profile.scale==1 ? 1080:profile.scale==2 ? 720:Int(dimensions.height)),"filter":profile.scalingFilter.rawValue,"rc":profile.rateControl.rawValue,"bitrate":String(profile.videoMbps*1_000_000),"quality":String(profile.quality),"key":String(profile.keyframeSeconds),"bframes":String(profile.bFrames),"profile":profile.videoProfile,"preset":profile.preset,"aq":profile.spatialAQ == .auto ? "-1":profile.spatialAQ == .enabled ? "1":"0","audioRate":String(profile.audioKbps*1000),"compression":String(profile.compressionLevel),"audioMode":profile.audioMode=="cbr" ? "off":profile.audioMode=="constrained" ? "constrained":"on","split":String(profile.splitMode),"splitValue":String(profile.splitMode==1 ? profile.splitSeconds:profile.splitMB)]
+   let settings:[String:String]=["sourceN":String(incoming.numerator),"sourceD":String(incoming.denominator),"fpsN":String(outputRate.numerator),"fpsD":String(outputRate.denominator),"output":url.path,"video":video,"audio":["pcm_s16le","aac","alac","libopus","flac"][profile.audio],"hevc":profile.captureHEVC ? "1":"0","encoder":String(profile.encoder),"decoder":String(profile.decoder),"height":String(profile.scale==1 ? 1080:profile.scale==2 ? 720:Int(dimensions.height)),"filter":profile.scalingFilter.rawValue,"rc":profile.rateControl.rawValue,"bitrate":String(profile.videoMbps*1_000_000),"quality":String(profile.quality),"key":String(profile.keyframeSeconds),"bframes":String(profile.bFrames),"profile":profile.videoProfile,"preset":profile.preset,"aq":profile.spatialAQ == .auto ? "-1":profile.spatialAQ == .enabled ? "1":"0","audioRate":String(profile.audioKbps*1000),"compression":String(profile.compressionLevel),"audioMode":profile.audioMode=="cbr" ? "off":profile.audioMode=="constrained" ? "constrained":"on","split":String(profile.splitMode),"splitValue":String(profile.splitMode==1 ? profile.splitSeconds:profile.splitMB)]
    process.executableURL=executable;process.arguments=settings.sorted{$0.key<$1.key}.map{"\($0.key)=\($0.value)"}
    process.standardInput=input;process.standardOutput=output;process.standardError=errors
    stdout=ProcessOutput(pipe:output,capacity:32768);stderr=ProcessOutput(pipe:errors,capacity:8192)
@@ -43,10 +45,11 @@ final class MediaHelperClient {
    started=true;format=f;try message(0,0,extra)
   }
   if type==0xc1,let format,!CMFormatDescriptionEqual(format,otherFormatDescription:f){throw RecorderError(message:"HDMI format changed. Start a new recording.")}
-  guard let block=CMSampleBufferGetDataBuffer(sample) else{return}
+  guard let block=CMSampleBufferGetDataBuffer(sample) else{return false}
   var data=Data(count:CMBlockBufferGetDataLength(block));let count=data.count
   try data.withUnsafeMutableBytes{try check(CMBlockBufferCopyDataBytes(block,atOffset:0,dataLength:count,destination:$0.baseAddress!),"Read media")}
   try message(type==0xc1 ? 1:2,CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value,data)
+  return true
  }
  func finish()throws -> URL {
   guard started else{throw RecorderError(message:"No video keyframe arrived")}

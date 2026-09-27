@@ -21,9 +21,11 @@ func dataBlock(_ data:Data) throws -> CMBlockBuffer {
 final class MediaConverter {
     private var sps:Data?,pps:Data?,vps:Data?
     let hevc:Bool
+    let frameTiming:FrameRateTracker
     private(set) var videoFormat:CMVideoFormatDescription?
     private(set) var audioFormat:CMAudioFormatDescription?
-    init(hevc:Bool=false) {
+    init(hevc:Bool=false,initialRate:VideoRate?=nil) {
+        frameTiming=FrameRateTracker(initialRate:initialRate)
         self.hevc=hevc
         var asbd=AudioStreamBasicDescription(mSampleRate:48000,mFormatID:kAudioFormatLinearPCM,mFormatFlags:kAudioFormatFlagIsSignedInteger|kAudioFormatFlagIsPacked,mBytesPerPacket:4,mFramesPerPacket:1,mBytesPerFrame:4,mChannelsPerFrame:2,mBitsPerChannel:16,mReserved:0)
         CMAudioFormatDescriptionCreate(allocator:kCFAllocatorDefault,asbd:&asbd,layoutSize:0,layout:nil,magicCookieSize:0,magicCookie:nil,extensions:nil,formatDescriptionOut:&audioFormat)
@@ -51,6 +53,7 @@ final class MediaConverter {
             try check(CMSampleBufferCreateReady(allocator:kCFAllocatorDefault,dataBuffer:block,formatDescription:format,sampleCount:frame.data.count/4,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleSizeEntryCount:1,sampleSizeArray:&size,sampleBufferOut:&sample),"Create audio sample")
             return sample.map{($0,false)}
         }
+        frameTiming.observe(frame.timestamp)
         var avcc=Data();var key=false;var changed=false
         for nal in Self.nals(frame.data) {
             let type=hevc ? (nal.first!>>1)&63 : nal.first!&31
@@ -77,7 +80,7 @@ final class MediaConverter {
         }
         guard let format=videoFormat,!avcc.isEmpty else{return nil}
         let block=try dataBlock(avcc);var sample:CMSampleBuffer?
-        var timing=CMSampleTimingInfo(duration:CMTime(value:1001,timescale:60000),presentationTimeStamp:pts,decodeTimeStamp:pts)
+        var timing=CMSampleTimingInfo(duration:frameTiming.rate?.duration ?? .invalid,presentationTimeStamp:pts,decodeTimeStamp:pts)
         var size=avcc.count
         try check(CMSampleBufferCreateReady(allocator:kCFAllocatorDefault,dataBuffer:block,formatDescription:format,sampleCount:1,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleSizeEntryCount:1,sampleSizeArray:&size,sampleBufferOut:&sample),"Create video sample")
         if let sample,let array=CMSampleBufferGetSampleAttachmentsArray(sample,createIfNecessary:true) {
@@ -108,7 +111,7 @@ final class MovieRecorder {
         if writer==nil {
             guard type==0xc1 && key,let vf=converter.videoFormat,let af=converter.audioFormat else{return}
             let w=try AVAssetWriter(outputURL:url,fileType:profile.container==0 ? .mov : .mp4)
-            let videoSettings=try profile.videoSettings(format:vf)
+            let videoSettings=try profile.videoSettings(format:vf,frameRate:converter.frameTiming.rate?.fps)
             let v=AVAssetWriterInput(mediaType:.video,outputSettings:videoSettings,sourceFormatHint:profile.transcodes ? CMSampleBufferGetFormatDescription(sample) : vf)
             let a=AVAssetWriterInput(mediaType:.audio,outputSettings:profile.audioSettings,sourceFormatHint:af)
             v.expectsMediaDataInRealTime=true;a.expectsMediaDataInRealTime=true

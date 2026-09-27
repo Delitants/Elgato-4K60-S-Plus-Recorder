@@ -27,8 +27,8 @@ final class NDIOutput {
   try process.run();output.fileHandleForWriting.closeFile();pipe.fileHandleForReading.closeFile();errors.fileHandleForWriting.closeFile()
   let fd=pipe.fileHandleForWriting.fileDescriptor;_ = fcntl(fd,F_SETFL,fcntl(fd,F_GETFL)|O_NONBLOCK);_ = fcntl(fd,F_SETNOSIGPIPE,1)
  }
- private func send(type:UInt32,width:Int,height:Int,pts:Int64,data:Data,videoBytes:Int?=nil)throws{
-  var message=Data();for var n in [type,UInt32(videoBytes ?? data.count),UInt32(width),UInt32(height)]{n=n.littleEndian;withUnsafeBytes(of:&n){message.append(contentsOf:$0)}};var pts=pts.littleEndian;withUnsafeBytes(of:&pts){message.append(contentsOf:$0)};message.append(data)
+ private func send(type:UInt32,width:Int,height:Int,pts:Int64,data:Data,videoBytes:Int?=nil,rate:VideoRate?=nil)throws{
+  var message=Data();for var n in [type,UInt32(videoBytes ?? data.count),UInt32(width),UInt32(height)]{n=n.littleEndian;withUnsafeBytes(of:&n){message.append(contentsOf:$0)}};var pts=pts.littleEndian;withUnsafeBytes(of:&pts){message.append(contentsOf:$0)};for var n in [UInt32(rate?.numerator ?? 0),UInt32(rate?.denominator ?? 0)]{n=n.littleEndian;withUnsafeBytes(of:&n){message.append(contentsOf:$0)}};message.append(data)
   let deadline=ProcessInfo.processInfo.systemUptime+1.0,fd=pipe.fileHandleForWriting.fileDescriptor
   try message.withUnsafeBytes{raw in var offset=0;while offset<raw.count{let n=Darwin.write(fd,raw.baseAddress!.advanced(by:offset),raw.count-offset);if n>0{offset+=n;continue};if errno==EINTR{continue};if errno==EAGAIN && ProcessInfo.processInfo.systemUptime<deadline{var p=pollfd(fd:fd,events:Int16(POLLOUT),revents:0);_ = poll(&p,1,5);continue};throw RecorderError(message:"NDI sender stopped or cannot keep up (sent \(offset) of \(raw.count) bytes; errno \(errno)). Toggle NDI off/on to restart.")}}
  }
@@ -42,7 +42,7 @@ final class NDIOutput {
    let height=min(sh,self.profile.ndiScale==1 ? 1080:self.profile.ndiScale==2 ? 720:sh),width=(sw*height/sh)/2*2
    let image=source.transformed(by:CGAffineTransform(scaleX:CGFloat(width)/CGFloat(sw),y:CGFloat(height)/CGFloat(sh)))
    guard let shared=self.shared else{return};self.context.render(image,toBitmap:shared.advanced(by:slot*self.slotSize),rowBytes:width*4,bounds:CGRect(x:0,y:0,width:width,height:height),format:.BGRA8,colorSpace:CGColorSpace(name:CGColorSpace.sRGB));var index=UInt32(slot).littleEndian;let data=withUnsafeBytes(of:&index){Data($0)}
-   do{try self.send(type:0,width:width,height:height,pts:CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value,data:data,videoBytes:width*height*4)}catch{self.fail(error)}
+   do{try self.send(type:0,width:width,height:height,pts:CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value,data:data,videoBytes:width*height*4,rate:VideoRate.measured(period:CMSampleBufferGetDuration(sample).seconds))}catch{self.fail(error)}
   }
  }
  func offerAudio(_ frame:DeviceFrame){

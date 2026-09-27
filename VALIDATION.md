@@ -139,3 +139,42 @@ from Original video recording allowed the timed 4K HEVC/Opus MKV test to finish
 under Rosetta with NDI active. Both codec matrices passed again after this change.
 The final Intel live file passed strict full video/audio decode with no errors;
 the test recording was deleted.
+
+
+## Version 0.4.0 — FPS and downsampling
+
+- Regression first reproduced: 30 fps samples were labeled 59.94, and a requested
+  two-second 60→30 conversion kept 120 frames instead of 60.
+- Swift suite passes integer/fractional selection, no upsampling, timestamp gaps,
+  settings migration, manual source override, and honest recording-start counters.
+- Real Elgato timestamps have alternating short/long intervals. A median-filtered
+  estimate incorrectly reported ~62.8 fps. Timeline regression now measures the
+  cadence; the live test settled at 59.94 fps. Synthetic alternating jitter and
+  a 500 ms gap remain at the correct rate throughout recovery.
+- Both packaged ARM and x86_64 helpers pass 60→30, 30→30, 29.97→29.97,
+  59.94→29.97, 60→24, 60→15 and 30→60 capped at 30. Tests check frame counts,
+  output timeline, complete decode, and byte-identical decoded PCM audio.
+- Original compressed 30 fps passthrough preserves all frames. Attempting 30→15
+  in Original mode is rejected before a file is created.
+- Time splitting with source GOP61 at 60→15 passes: 75 frames over five seconds,
+  complete PCM, independently keyed parts within the documented split bound.
+- Existing codec matrix remains ARM 14 passes; Intel 13 passes and required
+  hardware HEVC explicitly unavailable through Rosetta. HDR preservation passes.
+- Native CaptureEngine live test on the connected 20GAP9901: incoming 1080p H.264
+  settled at 59.94; output cap 30; preview delivered 183 frames at ~29.58 fps
+  across the measured interval. Four-second wall-clock timed H.264/Opus MKV
+  recording finalized. NDI receiver got 76 video frames plus 145 audio blocks
+  during discovery/three-second capture, with zero incorrect FPS metadata.
+- Both self-contained bundles pass signatures, architecture, dependency closure,
+  and a minimum-OS audit of every Mach-O. FFmpeg was rebuilt with macOS 26 linker
+  flags; 0.3.0 inadvertently included libraries declaring macOS 27.
+
+Physical HDMI 30 Hz switching has not been verified; no source-change response
+was available during the test. Automatic FPS follows the encoded USB timestamps,
+not a verified HDMI input-status field. Manual source FPS caps repeated streams.
+The final native-window visual check is pending because the desktop was locked;
+the live test exercised the real capture engine through a developer-only CLI
+harness, including preview delivery, recording, and NDI. macOS 26 runtime and
+physical Intel hardware testing remain unverified; host runtime was macOS 27.
+The final live MKV reports 30/1 fps, 118 H.264 frames, 48 kHz stereo Opus,
+and 3.962 seconds. Full strict decode passed with no errors; the file was deleted.
