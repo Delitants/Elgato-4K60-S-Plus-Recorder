@@ -21,6 +21,8 @@ xcrun swiftc -O -module-cache-path "$TEST_DIR/cache" Sources/PacketParser.swift 
 "$TEST_DIR/parser-performance-tests"
 xcrun swiftc -suppress-warnings -module-cache-path "$TEST_DIR/cache" Sources/FrameTiming.swift Sources/Profiles.swift Sources/Media.swift Sources/PacketParser.swift Tests/AdvancedProfileTests.swift -o "$TEST_DIR/advanced-profiles"
 "$TEST_DIR/advanced-profiles"
+xcrun swiftc -suppress-warnings -module-cache-path "$TEST_DIR/cache" Sources/FrameTiming.swift Sources/Profiles.swift Sources/Media.swift Sources/PacketParser.swift Tests/HardwareCQProfileTests.swift -o "$TEST_DIR/hardware-cq-profiles"
+"$TEST_DIR/hardware-cq-profiles"
 xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/Completion.swift Tests/CompletionTests.swift -o "$TEST_DIR/completion-tests"
 "$TEST_DIR/completion-tests"
 xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/CaptureFanout.swift Tests/FanoutTests.swift -o "$TEST_DIR/fanout-tests"

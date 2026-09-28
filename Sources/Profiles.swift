@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 import VideoToolbox
 
-enum RateControl:String,Codable,CaseIterable {case abr,cbr,crf}
+enum RateControl:String,Codable,CaseIterable {case abr,cbr,crf,cq}
 enum ScalingFilter:String,Codable,CaseIterable {case disabled,bilinear,area,bicubic,lanczos}
 enum AQMode:String,Codable,CaseIterable {case auto,enabled,disabled}
 struct RecordingProfile:Codable {
@@ -19,6 +19,7 @@ struct RecordingProfile:Codable {
     var audioKbps=192
     var rateControl=RateControl.abr
     var quality=23, keyframeSeconds=0, bFrames=0
+    var hardwareQuality=65
     var videoProfile="auto", preset="auto"
     var spatialAQ=AQMode.auto, scalingFilter=ScalingFilter.bicubic
     var audioMode="vbr", compressionLevel=5
@@ -27,7 +28,18 @@ struct RecordingProfile:Codable {
     var fileExtension:String { ["mov","mp4","mkv","ts"][min(3,max(0,container))] }
     var usesHelper:Bool {(encoder==2 && transcodes) || sourceFPS != .source || outputFPS != .source || container>=2 || codec==4 || audio>=3 || rateControl != .abr || keyframeSeconds != 0 || bFrames != 0 || videoProfile != "auto" || preset != "auto" || spatialAQ != .auto || (scale != 0 && scalingFilter != .bicubic) || splitMode != 0}
 
+    static var hardwareCQBuildSupported:Bool {
+        #if arch(arm64)
+        return true
+        #else
+        return false
+        #endif
+    }
     var recordingWarning:String? {
+        if rateControl == .cq {
+            if (codec != 1 && codec != 2) || encoder==2{return "Hardware CQ requires H.264 or HEVC with Automatic or Require hardware encoding."}
+            if !Self.hardwareCQBuildSupported{return "Hardware CQ requires the native Apple Silicon app. The Intel build supports ABR/CBR or software CRF instead."}
+        }
         if codec==1 && encoder != 2 && bFrames>0 {
             return "Hardware H.264/AVC B-frames are unavailable in this version because the hardware encoder can return invalid timestamps. Disable B-frames or choose Software encoding."
         }
@@ -35,12 +47,14 @@ struct RecordingProfile:Codable {
     }
     func validateRecording() throws {try validate();if let warning=recordingWarning{throw RecorderError(message:warning)}}
     var transcodes:Bool { codec != 0 }
+    // CQ ignores the bitrate field entirely, including stale or out-of-range input.
+    var helperVideoBitrate:Int {rateControl == .cq ? 0:videoMbps*1_000_000}
     func validate() throws {
         func require(_ ok:Bool,_ message:String)throws{if !ok{throw RecorderError(message:message)}}
         try require((0...3).contains(container) && (0...4).contains(codec) && (0...4).contains(audio),"Unknown codec or container.")
         try require((0...2).contains(encoder) && (0...2).contains(decoder) && (0...2).contains(scale),"Unknown encoder, decoder, or resolution.")
         try require((1...(captureHEVC ? 140 : 200)).contains(deviceMbps),"Device bitrate must be 1–200 Mbps for H.264, or 1–140 Mbps for HEVC.")
-        try require((1...200).contains(videoMbps),"Video bitrate must be 1–200 Mbps.")
+        try require(rateControl == .cq || (1...200).contains(videoMbps),"Video bitrate must be 1–200 Mbps.")
         try require((64...320).contains(audioKbps),"Audio bitrate must be 64–320 kbps.")
         try require(!(codec==3 && encoder==2),"Software ProRes is not supported. Choose Automatic or Require hardware.")
         try require(!(codec==0 && scale != 0),"Choose a Mac video encoder to rescale.")
@@ -51,7 +65,9 @@ struct RecordingProfile:Codable {
         try require(!(container==1 && encoder==2 && rateControl == .cbr),"Software CBR with HRD requires MKV or MPEG-TS. Use ABR/CRF for MP4.")
         try require(codec != 4 || encoder != 1,"AV1 hardware encoding is unavailable on this Mac.")
         try require(rateControl != .crf || ((codec==1 || codec==2) && encoder==2) || codec==4,"CRF requires software H.264, HEVC, or AV1.")
-        try require((0...63).contains(quality) && ((codec==4) || quality<=51),"Quality is outside the encoder range.")
+        try require(rateControl != .cq || ((codec==1 || codec==2) && encoder != 2),"Hardware CQ requires H.264 or HEVC with Automatic or Require hardware encoding.")
+        try require(rateControl != .cq || (0...100).contains(hardwareQuality),"Hardware CQ quality must be 0–100. Higher means better quality and larger files; 100 is not lossless.")
+        try require(rateControl == .cq || ((0...63).contains(quality) && ((codec==4) || quality<=51)),"Quality is outside the encoder range.")
         try require((0...60).contains(keyframeSeconds) && (0...4).contains(bFrames),"Keyframe interval must be Auto (0) or 1–60 seconds; B-frames 0–4.")
         try require(videoProfile != "baseline" || bFrames==0,"Baseline H.264 cannot use B-frames.")
         let profiles=codec==1 ? ["auto","baseline","main","high"] : codec==2 ? ["auto","main","main10"] : codec==3 ? ["auto","proxy","lt","standard","hq"] : codec==4 ? ["auto","main"] : ["auto"]
@@ -67,7 +83,7 @@ struct RecordingProfile:Codable {
         try require((0...2).contains(ndiScale) && !ndiName.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,"Choose an NDI name and valid output resolution.")
     }
     init() {}
-    enum CodingKeys:String,CodingKey {case sourceFPS,outputFPS,capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,keyframeSeconds,bFrames,videoProfile,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
+    enum CodingKeys:String,CodingKey {case sourceFPS,outputFPS,capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,hardwareQuality,keyframeSeconds,bFrames,videoProfile,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
     init(from sourceDecoder:Decoder)throws {
         let c=try sourceDecoder.container(keyedBy:CodingKeys.self)
         sourceFPS=try c.decodeIfPresent(FrameRateChoice.self,forKey:.sourceFPS) ?? .source
@@ -85,6 +101,7 @@ struct RecordingProfile:Codable {
         audioKbps=try c.decodeIfPresent(Int.self,forKey:.audioKbps) ?? audioKbps
         rateControl=try c.decodeIfPresent(RateControl.self,forKey:.rateControl) ?? rateControl
         quality=try c.decodeIfPresent(Int.self,forKey:.quality) ?? quality
+        hardwareQuality=try c.decodeIfPresent(Int.self,forKey:.hardwareQuality) ?? hardwareQuality
         keyframeSeconds=try c.decodeIfPresent(Int.self,forKey:.keyframeSeconds) ?? keyframeSeconds
         bFrames=try c.decodeIfPresent(Int.self,forKey:.bFrames) ?? bFrames
         videoProfile=try c.decodeIfPresent(String.self,forKey:.videoProfile) ?? videoProfile

@@ -127,7 +127,7 @@ a supported encoder and reduce output resolution/workload if it cannot keep up.
 | Containers | MOV, MP4, MKV, MPEG-TS |
 | Audio | PCM, AAC, ALAC, Opus, FLAC; 48 kHz stereo |
 | Processing | Automatic, required hardware, software decoding/encoding where supported |
-| Rate control | ABR; CBR for supported H.264/HEVC paths; software CRF |
+| Rate control | ABR; CBR for supported H.264/HEVC paths; software CRF; hardware CQ on Apple Silicon |
 | Compression | Software presets, AV1 effort, ProRes profiles, Opus/FLAC effort |
 | Advanced video | Codec profiles, B-frames, keyframe interval (0 = Auto), spatial AQ |
 | Frame rate | Match incoming stream or explicit FPS cap; manual source override; no upsampling |
@@ -152,6 +152,28 @@ corresponding audio sample. Lossy audio encoders may introduce priming/padding a
 individual segment boundaries. If the recording backend cannot keep up, recording
 stops with an error instead of silently dropping recording frames. Keep any
 reported partial file; an error does not guarantee the last file was finalized.
+
+### Hardware constant quality
+
+In **Settings → Video**, choose **H.264 / AVC** or **HEVC**, use **Automatic**
+or **Require hardware**, then select **CQ · hardware constant quality**.
+Set **Hardware CQ · 0–100** (default 65). Higher means better quality and larger
+files; lower means smaller files with more compression. Quality 100 is not lossless.
+Compare representative motion, dark gradients and fine detail before choosing
+an archival setting. Values are not equivalent to software CRF: its scale runs
+in the opposite direction, and the two quality settings are saved independently.
+
+CQ disables the video bitrate control. It uses VideoToolbox's quality target,
+allowing bitrate and file size to vary with scene complexity; there is no bitrate
+or file-size guarantee. CQ requires hardware even when Automatic is selected;
+an unsupported hardware encoder fails clearly, without falling back to software
+or ABR. Incoming device bitrate, preview, audio and output FPS controls retain
+their existing meanings. CQ changes recording compression, not USB input traffic.
+
+The bundled CQ implementation requires the **native Apple Silicon build**.
+Intel builds show the option as unavailable and retain ABR/CBR and software CRF.
+Saved CQ profiles remain readable on Intel, with an explicit warning before
+recording. H.264 hardware B-frame and HDR-transcoding restrictions still apply.
 
 ### Compression effort
 
@@ -237,4 +259,4 @@ remain visible so the app can explain an incompatible selection.
 
 See [BUILD.md](BUILD.md#output-combination-audit) for the output-matrix runner.
 
-[0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
+[0.6.0 validation](docs/VALIDATION-0.6.0.md) · [0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)

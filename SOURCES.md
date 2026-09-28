@@ -81,6 +81,14 @@ contains corresponding open-source dependency inputs; it does not contain the
 proprietary Windows driver or NDI runtime source. App/helper source is published
 in this repository; the v0.4.1 application code is pinned by its release tag.
 
+## Hardware constant quality
+
+The CQ implementation follows the [FFmpeg 8 VideoToolbox encoder source](https://ffmpeg.org/doxygen/8.0/videotoolboxenc_8c_source.html)
+and Apple's [VideoToolbox Quality property](https://developer.apple.com/documentation/videotoolbox/kvtcompressionpropertykey_quality).
+The bundled encoder enables QSCALE on native Apple Silicon and translates its
+quality value to the VideoToolbox 0–1 range. This platform restriction is reflected
+in the UI and helper; it is not a claim that all Intel hardware lacks quality controls.
+
 ## Images
 
 The product photograph and application screenshot in the README were supplied by

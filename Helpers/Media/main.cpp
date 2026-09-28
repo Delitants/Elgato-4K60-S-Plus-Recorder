@@ -64,15 +64,18 @@ class Recorder {
    ve->pix_fmt=codec.find("prores")!=string::npos ? AV_PIX_FMT_P210LE : ten?(codec.find("videotoolbox")!=string::npos?AV_PIX_FMT_P010LE:AV_PIX_FMT_YUV420P10LE):AV_PIX_FMT_YUV420P;
    ve->color_primaries=source->color_primaries;ve->color_trc=source->color_trc;ve->colorspace=source->colorspace;ve->color_range=source->color_range;
    if(source->color_trc==AVCOL_TRC_SMPTE2084||source->color_trc==AVCOL_TRC_ARIB_STD_B67)throw runtime_error("HDR transcoding is not validated. Use Original video.");
-   string rc=opt("rc","abr");ve->bit_rate=rc=="crf"?0:num("bitrate",20000000);int key=num("key");if(key>0)ve->gop_size=max(1,int(av_rescale_q(key,{1,1},av_inv_q(outputRate))));
+   string rc=opt("rc","abr");ve->bit_rate=(rc=="crf"||rc=="cq")?0:num("bitrate",20000000);int key=num("key");if(key>0)ve->gop_size=max(1,int(av_rescale_q(key,{1,1},av_inv_q(outputRate))));
+   // VideoToolbox maps qscale / (FF_QP2LAMBDA * 100) to Quality 0...1.
+   // Keep QSCALE set even at zero so it cannot fall back to average bitrate.
+   if(rc=="cq"){ve->flags|=AV_CODEC_FLAG_QSCALE;ve->global_quality=num("hardwareQuality",65)*FF_QP2LAMBDA;}
    ve->max_b_frames=num("bframes");if(out->oformat->flags&AVFMT_GLOBALHEADER)ve->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
    AVDictionary*d=nullptr;auto set=[&](string k,string v){av_dict_set(&d,k.c_str(),v.c_str(),0);};
    if(rc=="crf")set("crf",opt("quality","23"));
    if(opt("preset","auto")!="auto")set("preset",opt("preset"));else if(codec=="libsvtav1")set("preset","10");else if(codec=="libx264"||codec=="libx265")set("preset","veryfast");
    string profile=opt("profile","auto");if(profile!="auto") {if(codec.find("prores")!=string::npos){map<string,string>p={{"proxy","0"},{"lt","1"},{"standard","2"},{"hq","3"}};set("profile",p.at(profile));}else set("profile",profile);}
-   if(codec.find("videotoolbox")!=string::npos){set("realtime","1");set("allow_sw",num("encoder")==1?"0":"1");set("spatial_aq",opt("aq","-1"));if(rc=="cbr")set("constant_bit_rate","1");}
+   if(codec.find("videotoolbox")!=string::npos){set("realtime","1");set("allow_sw",(num("encoder")==1||rc=="cq")?"0":"1");set("spatial_aq",opt("aq","-1"));if(rc=="cbr")set("constant_bit_rate","1");}
    else if(codec=="libx264"||codec=="libx265") {string params;if(rc=="cbr"){ve->rc_max_rate=ve->bit_rate;ve->rc_min_rate=ve->bit_rate;ve->rc_buffer_size=int(ve->bit_rate);params="vbv-maxrate="+to_string(ve->bit_rate/1000)+":vbv-bufsize="+to_string(ve->bit_rate/1000);if(codec=="libx264")params+=":nal-hrd=cbr";}if(opt("aq","-1")!="-1"){if(!params.empty())params+=":";params+="aq-mode="+opt("aq");}if(!params.empty())set(codec=="libx264"?"x264-params":"x265-params",params);}
-   ck(avcodec_open2(ve,c,&d),"Open video encoder");if(av_dict_count(d)){string unknown=av_dict_get(d,"",nullptr,AV_DICT_IGNORE_SUFFIX)->key;av_dict_free(&d);throw runtime_error("Encoder did not accept option: "+unknown);}av_dict_free(&d);
+   ck(avcodec_open2(ve,c,&d),rc=="cq"?"Open hardware CQ encoder (no bitrate or software fallback)":"Open video encoder");if(av_dict_count(d)){string unknown=av_dict_get(d,"",nullptr,AV_DICT_IGNORE_SUFFIX)->key;av_dict_free(&d);throw runtime_error("Encoder did not accept option: "+unknown);}av_dict_free(&d);
    ck(avcodec_parameters_from_context(vs->codecpar,ve),"Video output format");vs->time_base=ve->time_base;
   }
   string ac=opt("audio","aac");const AVCodec*a=avcodec_find_encoder_by_name(ac.c_str());if(!a)throw runtime_error("Audio encoder unavailable");ae=avcodec_alloc_context3(a);ae->sample_rate=48000;av_channel_layout_default(&ae->ch_layout,2);ae->time_base={1,48000};ae->sample_fmt=ac=="aac"?AV_SAMPLE_FMT_FLTP:ac=="alac"?AV_SAMPLE_FMT_S16P:AV_SAMPLE_FMT_S16;
@@ -136,7 +139,16 @@ class Recorder {
  }
  void receiveFrames(){AVFrame*f=av_frame_alloc();int r;while((r=avcodec_receive_frame(dec,f))>=0){auto it=pending.find(f->pts);if(it==pending.end())throw runtime_error("Decoded timestamp has no source packet");videoFrame(f,f->pts,(f->flags&AV_FRAME_FLAG_KEY)!=0,it->second);av_packet_free(&it->second);pending.erase(it);av_frame_unref(f);}av_frame_free(&f);if(r!=AVERROR(EAGAIN)&&r!=AVERROR_EOF)ck(r,"Read decoded frame");}
 public:
- Recorder():copy(opt("video")=="copy"){if(opt("video")=="h264_videotoolbox" && num("bframes")>0)throw runtime_error("Hardware H.264 B-frames are unavailable: disable B-frames or choose software encoding");}
+ Recorder():copy(opt("video")=="copy"){
+  if(opt("rc")=="cq"){
+   if((opt("video")!="h264_videotoolbox" && opt("video")!="hevc_videotoolbox") || num("encoder")==2)throw runtime_error("Hardware CQ requires a hardware H.264 or HEVC encoder");
+   if(num("hardwareQuality",65)<0||num("hardwareQuality",65)>100)throw runtime_error("Hardware CQ quality must be 0-100");
+   #if !defined(__aarch64__)
+   throw runtime_error("Hardware CQ requires the native Apple Silicon app; use ABR/CBR or software CRF in the Intel build");
+   #endif
+  }
+  if(opt("video")=="h264_videotoolbox" && num("bframes")>0)throw runtime_error("Hardware H.264 B-frames are unavailable: disable B-frames or choose software encoding");
+ }
  ~Recorder(){for(auto &entry:pending)av_packet_free(&entry.second);if(out){if(out->pb)avio_closep(&out->pb);avformat_free_context(out);}avcodec_free_context(&ve);avcodec_free_context(&ae);avcodec_free_context(&dec);av_buffer_unref(&hw);sws_freeContext(scaler);swr_free(&resampler);if(fifo)av_audio_fifo_free(fifo);}
  void setup(vector<uint8_t>e){if(dec||e.empty())throw runtime_error("Invalid or repeated setup");extra=move(e);auto c=avcodec_find_decoder(num("hevc")?AV_CODEC_ID_HEVC:AV_CODEC_ID_H264);dec=avcodec_alloc_context3(c);dec->pkt_timebase=US;dec->extradata=(uint8_t*)av_mallocz(extra.size()+AV_INPUT_BUFFER_PADDING_SIZE);memcpy(dec->extradata,extra.data(),extra.size());dec->extradata_size=int(extra.size());dec->thread_count=1;dec->flags|=AV_CODEC_FLAG_LOW_DELAY;
   if(num("decoder")!=2){int r=av_hwdevice_ctx_create(&hw,AV_HWDEVICE_TYPE_VIDEOTOOLBOX,nullptr,nullptr,0);if(r>=0){dec->hw_device_ctx=av_buffer_ref(hw);dec->get_format=hardwareFormat;}else if(num("decoder")==1)ck(r,"Required hardware decoder");}
