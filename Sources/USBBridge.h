@@ -5,6 +5,8 @@ typedef struct CaptureHandle CaptureHandle;
 CaptureHandle *capture_open(char *error, int error_size);
 CaptureHandle *capture_open_config(int hevc, int width, int height, int mbps, char *error, int error_size);
 int capture_read(CaptureHandle *handle, uint8_t *buffer, int capacity);
+// Negotiated speed from libusb for the most recent open attempt, including USB 2 rejection.
+int capture_last_usb_speed(void);
 void capture_close(CaptureHandle *handle);
 #endif
 // Fixed-argument adapter for Swift; POSIX shm_open is variadic on macOS.

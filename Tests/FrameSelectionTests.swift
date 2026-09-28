@@ -4,10 +4,19 @@ import Foundation
   for (n,d,target,want) in [(60,1,FrameRateChoice.fps30,60),(60,1,.fps24,48),(60000,1001,.fps2997,60),(30,1,.fps60,60),(30,1,.source,60)] {
    let incoming=VideoRate(numerator:Int32(n),denominator:Int32(d));var p=RecordingProfile();p.outputFPS=target
    let rate=p.effectiveRate(incoming:incoming);var selector=FrameSelector(),times=[Int64]()
-   for i in 0..<(n==60000 ? 120:n*2) {let pts=Int64((Double(i)*1e6*Double(d)/Double(n)).rounded());if let t=selector.select(timestamp:pts,rate:rate){times.append(t)}}
+   for i in 0..<(n==60000 ? 120:n*2) {let pts=Int64((Double(i)*1e6*Double(d)/Double(n)).rounded());if let t=selector.select(timestamp:pts,rate:rate,sourceRate:incoming){times.append(t)}}
    assert(times.count==want,"Wrong frame count \(n)/\(d) -> \(target): \(times.count)")
    assert(times.first==0 && zip(times,times.dropFirst()).allSatisfy{$0<$1})
   }
+  // Quantized/jittered device timestamps must still select every other source frame.
+  var jitterGate=FrameSelector();var chosen=[Int]()
+  let input=VideoRate(numerator:60,denominator:1),output=VideoRate(numerator:30,denominator:1)
+  for i in 0..<120 {
+   let jitter:Int64 = i==0 ? 0 : (i%4==2 ? -2200 : 900)
+   let t=Int64((Double(i)*1e6/60).rounded())+jitter
+   if jitterGate.select(timestamp:t,rate:output,sourceRate:input) != nil {chosen.append(i)}
+  }
+  assert(chosen==Array(stride(from:0,to:120,by:2)),"Timestamp jitter caused uneven source-frame cadence: \(chosen)")
   var gate=FrameSelector();let thirty=VideoRate(numerator:30,denominator:1)
   assert(gate.select(timestamp:0,rate:thirty)==0)
   assert(gate.select(timestamp:1_000_000,rate:thirty)==1_000_000,"A stall must remain a gap, not be sped up or filled")

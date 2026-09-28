@@ -15,7 +15,50 @@ final class PreviewView:NSView {
         };videoLayer.enqueue(sample)
     }
 }
-final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
+// Peak amplitude is displayed on a logarithmic dBFS scale, independent of monitor volume.
+final class StereoMeterView:NSView {
+    private var levels=[Double](repeating:-60,count:2),peaks=[Double](repeating:-60,count:2)
+    private var holdUntil=[Double](repeating:0,count:2)
+    private var lastUpdate=ProcessInfo.processInfo.systemUptime
+    override var intrinsicContentSize:NSSize{NSSize(width:300,height:54)}
+    override init(frame:NSRect){super.init(frame:frame);setAccessibilityLabel("HDMI stereo peak meter in dBFS")}
+    required init?(coder:NSCoder){fatalError()}
+    func update(left:Double,right:Double){
+        let now=ProcessInfo.processInfo.systemUptime,elapsed=max(0,now-lastUpdate);lastUpdate=now
+        for (channel,amplitude) in [left,right].enumerated(){
+            let db=amplitude.isFinite && amplitude>0 ? max(-60,min(0,20*log10(amplitude))) : -60
+            levels[channel]=max(db,levels[channel]-48*elapsed)
+            if db>=peaks[channel]{peaks[channel]=db;holdUntil[channel]=now+1}
+            else if now>holdUntil[channel]{peaks[channel]=max(levels[channel],peaks[channel]-20*elapsed)}
+        }
+        needsDisplay=true
+    }
+    override func draw(_ dirtyRect:NSRect){
+        super.draw(dirtyRect)
+        let x:CGFloat=18,width=max(1,bounds.width-24),height:CGFloat=11
+        func position(_ db:Double)->CGFloat{x+CGFloat((db+60)/60)*width}
+        let text:[NSAttributedString.Key:Any]=[.font:NSFont.monospacedSystemFont(ofSize:9,weight:.regular),.foregroundColor:NSColor.secondaryLabelColor]
+        for channel in 0..<2 {
+            let y:CGFloat=channel==0 ? 36:21
+            (channel==0 ? "L":"R").draw(at:NSPoint(x:0,y:y),withAttributes:text)
+            NSColor.quaternaryLabelColor.setFill();NSBezierPath(rect:NSRect(x:x,y:y,width:width,height:height)).fill()
+            for (low,high,color) in [(-60.0,-20.0,NSColor.systemGreen),(-20.0,-9.0,NSColor.systemYellow),(-9.0,0.0,NSColor.systemRed)] {
+                let end=min(levels[channel],high)
+                if end>low {color.setFill();NSBezierPath(rect:NSRect(x:position(low),y:y,width:position(end)-position(low),height:height)).fill()}
+            }
+            if peaks[channel] > -60 {
+                (peaks[channel]>=(-9) ? NSColor.systemRed:NSColor.labelColor).setFill()
+                NSBezierPath(rect:NSRect(x:min(x+width-2,position(peaks[channel])),y:y-1,width:2,height:height+2)).fill()
+            }
+        }
+        for db in [-60,-40,-20,-9,0] {
+            let label=db==0 ? "0 dBFS":String(db)
+            let labelWidth=(label as NSString).size(withAttributes:text).width
+            label.draw(at:NSPoint(x:min(bounds.width-labelWidth,max(0,position(Double(db))-labelWidth/2)),y:3),withAttributes:text)
+        }
+    }
+}
+final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFieldDelegate {
     let engine=CaptureEngine()
     var window:NSWindow!,timer:Timer?
     let preview=PreviewView(frame:.zero)
@@ -25,17 +68,20 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
     let clock=NSTextField(labelWithString:"00:00")
     let stats=NSTextField(labelWithString:"")
     let audioLabel=NSTextField(labelWithString:"HDMI audio · awaiting packets")
-    let meter=NSLevelIndicator()
+    let meter=StereoMeterView(frame:.zero)
+    let usbBadge=NSTextField(labelWithString:" USB · checking ")
     let folderLabel=NSTextField(labelWithString:"")
     let connect=NSButton(title:"Disconnect",target:nil,action:nil)
     let record=NSButton(title:"Record",target:nil,action:nil)
     let reveal=NSButton(title:"Show Last Recording",target:nil,action:nil)
     let videoToggle=NSButton(checkboxWithTitle:"Video preview",target:nil,action:nil)
-    let audioToggle=NSButton(checkboxWithTitle:"Listen to HDMI audio",target:nil,action:nil)
+    let audioToggle=NSButton(checkboxWithTitle:"Audio preview",target:nil,action:nil)
     let volume=NSSlider(value:0.7,minValue:0,maxValue:1,target:nil,action:nil)
     let durationToggle=NSButton(checkboxWithTitle:"Stop after",target:nil,action:nil)
     let durationField=NSTextField(string:"00:30:00")
     let countdown=NSTextField(labelWithString:"")
+    private var appliedRecordingLimit:Double?
+    private var durationValidation:String?
     var profile=RecordingProfile()
     var settingsController:RecordingSettings?
     let settings=NSButton(title:"Settings…",target:nil,action:nil)
@@ -52,13 +98,16 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
         let device=NSTextField(labelWithString:"GAME CAPTURE 4K60 S+");device.font = .systemFont(ofSize:11,weight:.medium);device.textColor = .secondaryLabelColor
         let identity=NSStackView(views:[device,title]);identity.orientation = .vertical;identity.alignment = .leading;identity.spacing=4
         status.font = .systemFont(ofSize:14,weight:.medium)
-        let top=NSStackView(views:[identity,NSView(),status]);top.orientation = .horizontal;top.distribution = .fill
+        let icon=NSImageView();icon.image=Bundle.main.url(forResource:"Recorder",withExtension:"icns").flatMap{NSImage(contentsOf:$0)} ?? NSApp.applicationIconImage
+        icon.imageScaling = .scaleProportionallyUpOrDown;icon.widthAnchor.constraint(equalToConstant:52).isActive=true;icon.heightAnchor.constraint(equalToConstant:52).isActive=true
+        usbBadge.font = .systemFont(ofSize:11,weight:.semibold);usbBadge.alignment = .center;usbBadge.wantsLayer=true;usbBadge.layer?.cornerRadius=5;usbBadge.layer?.borderWidth=1
+        let connectionStatus=NSStackView(views:[usbBadge,status]);connectionStatus.orientation = .vertical;connectionStatus.alignment = .trailing;connectionStatus.spacing=6
+        let top=NSStackView(views:[icon,identity,NSView(),connectionStatus]);top.orientation = .horizontal;top.distribution = .fill;top.spacing=12
         format.font = .monospacedSystemFont(ofSize:12,weight:.regular);format.textColor = .secondaryLabelColor
         clock.font = .monospacedDigitSystemFont(ofSize:30,weight:.medium)
         detail.textColor = .secondaryLabelColor;detail.font = .systemFont(ofSize:12);detail.maximumNumberOfLines=2
         let timerColumn=NSStackView(views:[clock,detail]);timerColumn.orientation = .vertical;timerColumn.alignment = .leading;timerColumn.spacing=4
-        meter.levelIndicatorStyle = .continuousCapacity;meter.minValue=0;meter.maxValue=1;meter.warningValue=0.8;meter.criticalValue=0.95
-        meter.widthAnchor.constraint(equalToConstant:220).isActive=true
+        meter.widthAnchor.constraint(equalToConstant:300).isActive=true;meter.heightAnchor.constraint(equalToConstant:54).isActive=true
         audioLabel.font = .systemFont(ofSize:12)
         let audioNote=NSTextField(labelWithString:"48 kHz stereo · preview volume does not affect recording");audioNote.font = .systemFont(ofSize:10);audioNote.textColor = .secondaryLabelColor
         let audioColumn=NSStackView(views:[audioLabel,meter,audioNote]);audioColumn.orientation = .vertical;audioColumn.alignment = .leading;audioColumn.spacing=5
@@ -79,8 +128,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
         let previewControls=NSStackView(views:[videoToggle,audioToggle,NSTextField(labelWithString:"Volume"),volume,NSView()]);previewControls.spacing=16
         durationToggle.target=self;durationToggle.action=#selector(durationChanged)
         durationField.widthAnchor.constraint(equalToConstant:90).isActive=true;durationField.isEnabled=false
+        durationField.delegate=self;durationField.target=self;durationField.action=#selector(durationEdited)
         durationField.setAccessibilityLabel("Recording duration hours minutes seconds")
-        durationField.toolTip="Hours:minutes:seconds. The timer starts when you press Record."
+        durationField.toolTip="Hours:minutes:seconds from the actual recording start. Edit during recording and press Return to update the total limit; turning Stop after off removes it."
         countdown.font = .monospacedDigitSystemFont(ofSize:12,weight:.medium)
         let durationControls=NSStackView(views:[durationToggle,durationField,NSTextField(labelWithString:"hh:mm:ss"),countdown,NSView()]);durationControls.spacing=10
         let stack=NSStackView(views:[top,format,preview,previewControls,info,durationControls,controls,folderLabel,stats]);stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=14;stack.translatesAutoresizingMaskIntoConstraints=false;root.addSubview(stack)
@@ -102,22 +152,33 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
     }
     func refresh(){
         let(s,frame)=engine.snapshot();current=s;if videoToggle.state == .on,let frame{preview.show(frame)}
-        status.stringValue=s.status;status.textColor=s.recording ? .systemRed : .labelColor
+        let usbUnsupported=s.usbSpeed>0 && s.usbSpeed<4
+        let warning=usbUnsupported || s.monitoringError != nil || ["waiting","failed","error","retrying","disconnected","warning","unsupported"].contains{ s.status.localizedCaseInsensitiveContains($0) }
+        status.stringValue=s.status;status.textColor=warning ? .systemOrange : (s.recording ? .systemRed : .labelColor)
+        usbBadge.stringValue=s.usbSpeed>=4 ? (s.usbSpeed>=5 ? " USB 3.1+ · 10+ Gbps ":" USB 3.0 · 5 Gbps ") : (s.usbSpeed==3 ? " USB 2.0 · Unsupported ":usbUnsupported ? " USB · Unsupported ":" USB · not connected ")
+        usbBadge.textColor=s.usbSpeed>=4 ? .white : .labelColor
+        usbBadge.layer?.backgroundColor=(s.usbSpeed>=4 ? NSColor.systemBlue:NSColor.textBackgroundColor).cgColor
+        usbBadge.layer?.borderColor=(s.usbSpeed>=4 ? NSColor.systemBlue:NSColor.separatorColor).cgColor
+        usbBadge.toolTip=usbUnsupported ? "USB 2 is unsupported. Connect the 4K60 S+ directly using a USB 3 cable and port.":"USB 3 is required for capture; encoder bitrate is separate from USB link speed."
         detail.stringValue=s.monitoringError.map{"Audio monitoring: \($0)"} ?? (s.detail + (s.ndiStatus.map{" · " + $0} ?? ""));format.stringValue=s.format
+        if usbUnsupported{detail.stringValue += " · USB 2 is unsupported; a USB 3 cable and port are required."}
+        detail.textColor=warning ? .systemOrange : .secondaryLabelColor
         let seconds=Int(s.seconds);clock.stringValue=String(format:"%02d:%02d:%02d",seconds/3600,(seconds/60)%60,seconds%60)
         record.title=s.recording ? "Stop Recording" : "Record";record.isEnabled=s.connected && !s.saving
         connect.title=s.connected || s.connecting ? "Disconnect" : "Connect";connect.isEnabled = !s.saving && !s.connecting
-        meter.doubleValue=s.peak
+        meter.update(left:s.peakLeft,right:s.peakRight)
         audioLabel.stringValue=s.audioFrames==0 ? "HDMI audio · awaiting packets" : (s.peak<0.0001 ? "HDMI audio · silent" : "HDMI audio · signal detected")
-        stats.stringValue="\(s.videoFrames) video frames  ·  \(s.audioFrames) audio samples  ·  \(s.bytes/1_000_000) MB received  ·  \(s.discarded) discarded"
+        stats.stringValue="\(s.videoFrames) video frames  ·  \(s.audioFrames) audio samples  ·  \(s.writtenBytes/1_000_000) MB written  ·  \(s.discarded) discarded"
         reveal.isEnabled=s.lastFile != nil
         settings.isEnabled = !s.recording && !s.saving && !s.connecting
-        durationToggle.isEnabled = !s.recording && !s.saving
-        durationField.isEnabled = durationToggle.state == .on && !s.recording && !s.saving
-        if let remaining=s.remaining { let n=Int(ceil(remaining));countdown.stringValue=String(format:"%02d:%02d:%02d remaining",n/3600,(n/60)%60,n%60) } else { countdown.stringValue="" }
+        durationToggle.isEnabled = !s.saving
+        durationField.isEnabled = durationToggle.state == .on && !s.saving
+        countdown.textColor=durationValidation == nil ? .secondaryLabelColor : .systemOrange
+        if let validation=durationValidation{countdown.stringValue=validation}
+        else if let remaining=s.remaining { let n=Int(ceil(remaining));countdown.stringValue=String(format:"%02d:%02d:%02d remaining",n/3600,(n/60)%60,n%60) } else { countdown.stringValue="" }
     }
     @objc func showSettings(){
-        settingsController=RecordingSettings(profile:profile){ [weak self] value in
+        settingsController=RecordingSettings(profile:profile,usbSpeed:current.usbSpeed){ [weak self] value in
             guard let self else{return};self.profile=value
             if let data=try? JSONEncoder().encode(value){UserDefaults.standard.set(data,forKey:"recordingProfile")}
             self.engine.disconnect {DispatchQueue.main.async{
@@ -132,24 +193,35 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
         engine.setPreview(video:video,audio:audio,volume:volume.floatValue)
         if !video { preview.videoLayer.flushAndRemoveImage() }
     }
-    @objc func durationChanged(){durationField.isEnabled=durationToggle.state == .on}
+    private func recordingLimit()throws->Double {
+        guard durationToggle.state == .on else{return 0}
+        let parts=durationField.stringValue.trimmingCharacters(in:.whitespacesAndNewlines).split(separator:":",omittingEmptySubsequences:false)
+        guard parts.count==3,parts.allSatisfy({!$0.isEmpty && $0.allSatisfy({$0.isASCII && $0.isNumber})}),let h=Int(parts[0]),let m=Int(parts[1]),let s=Int(parts[2]),h<=999,m<60,s<60,h+m+s>0 else {throw RecorderError(message:"Enter hh:mm:ss, for example 00:30:00.")}
+        return Double(h*3600+m*60+s)
+    }
+    @objc func durationChanged(){durationField.isEnabled=durationToggle.state == .on;durationEdited()}
+    @objc func durationEdited(){
+        do{
+            let limit=try recordingLimit();durationValidation=nil;durationField.textColor = .labelColor
+            // Return and editing-end can both fire. Apply each value only once;
+            // the engine keeps the original recording start as its reference.
+            if current.recording && appliedRecordingLimit != limit{engine.setRecordingLimit(limit);appliedRecordingLimit=limit}
+        }catch{durationValidation="Use hh:mm:ss; current limit unchanged.";durationField.textColor = .systemOrange}
+    }
+    func controlTextDidEndEditing(_ notification:Notification){if let field=notification.object as? NSTextField,field === durationField{durationEdited()}}
     @objc func toggleConnection(){if current.connected{engine.disconnect()}else{preview.videoLayer.flushAndRemoveImage();engine.connect()}}
     @objc func toggleRecording(){
         refresh()
         if current.recording{engine.stopRecording();return}
         do{
             try profile.validateRecording()
-            var limit:Double=0
-            if durationToggle.state == .on {
-                let parts=durationField.stringValue.split(separator:":",omittingEmptySubsequences:false)
-                guard parts.count==3,let h=Int(parts[0]),let m=Int(parts[1]),let s=Int(parts[2]),h>=0,h<=999,m>=0,m<60,s>=0,s<60,h+m+s>0 else { throw RecorderError(message:"Enter a duration as hh:mm:ss, for example 00:30:00.") }
-                limit=Double(h*3600+m*60+s)
-            }
+            let limit=try recordingLimit();durationValidation=nil;durationField.textColor = .labelColor
             try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
             let attributes=try FileManager.default.attributesOfFileSystem(forPath:folder.path)
             if let free=attributes[.systemFreeSize] as? NSNumber,free.int64Value<500_000_000{throw RecorderError(message:"Less than 500 MB free in the recording destination.")}
             let formatter=DateFormatter();formatter.dateFormat="yyyy-MM-dd_HH-mm-ss"
             let name="Elgato_\(formatter.string(from:Date()))_\(UUID().uuidString.prefix(4)).\(profile.fileExtension)"
+            appliedRecordingLimit=limit
             engine.startRecording(folder.appendingPathComponent(name),limit:limit)
         }catch{let alert=NSAlert();alert.messageText="Cannot start recording";alert.informativeText=error.localizedDescription;alert.beginSheetModal(for:window)}
     }

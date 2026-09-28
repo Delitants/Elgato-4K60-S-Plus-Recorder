@@ -61,18 +61,33 @@ buffer, with approximately 64 ms of startup buffering and recovery after a stall
 It cannot remove the capture hardware's inherent latency. Under sustained system
 load, preview may skip or resynchronize rather than grow an unbounded delay.
 
-**Stop after** takes `hh:mm:ss`. Its monotonic wall-clock timer begins when Record
-is pressed, including time waiting for the first keyframe or a lost HDMI signal.
-The media file can therefore be shorter than the timer interval.
+**Stop after** takes `hh:mm:ss` and can be enabled, disabled or edited while
+recording. Press Return or leave the field to apply an edit. The limit is measured
+from the first accepted video keyframe, not from when the checkbox is enabled.
+Turning it off and back on preserves that start time. A limit already exceeded
+stops recording promptly; lost HDMI time still counts after recording has begun.
+
+The footer reports **MB written** for the current or most recent recording,
+including all split parts. This measures output file sizes, not USB input traffic.
+The stereo meter uses dBFS, green/yellow/red ranges and peak hold; monitoring
+volume does not change its readings or the recorded audio.
+
+The header reports the negotiated USB connection speed. USB 3.0 (5 Gbps) is shown
+in blue. USB 2.0 is identified but capture remains unsupported. The capture bitrate
+menu chooses an **encoder target**, not USB bandwidth; a faster host port does
+not create additional device modes. Existing valid custom targets are preserved.
 
 ## Frame rate and downsampling
 
 **Settings → Video → Output FPS** applies to video preview, recording, and NDI.
 The default **Match incoming stream** follows device timestamps. Available caps
 are 15, 23.976, 24, 25, 29.97, 30, 50, 59.94 and 60 fps. A 30 fps stream stays
-30 even if a 60 fps cap is selected. Lower caps select frames evenly, preserving
-playback speed and audio. Missing frames remain gaps; no interpolation or frame
-duplication is performed. Resolution scaling is independent of this setting.
+30 even if a 60 fps cap is selected. Lower caps select frames against the measured source cadence, correcting
+sub-frame device timestamp jitter before selection and writing evenly spaced
+output timestamps. Playback speed and audio are preserved. Missing source frames
+remain gaps; no motion interpolation or frame duplication is performed. Conversion
+between non-divisible rates (for example 60→24) retains the unavoidable original
+frame cadence; it cannot create intermediate motion that was never captured. Resolution scaling is independent of this setting.
 
 The incoming rate is measured over a short timestamp window to tolerate the
 device's timing jitter. The status shows **Incoming** and **Output** FPS instead
@@ -124,6 +139,15 @@ corresponding audio sample. Lossy audio encoders may introduce priming/padding a
 individual segment boundaries. If the recording backend cannot keep up, recording
 stops with an error instead of silently dropping recording frames. Keep any
 reported partial file; an error does not guarantee the last file was finalized.
+
+### Compression effort
+
+In **Settings → Video**, choose **H.264 / AVC** or **HEVC**, then
+**Mac encoder → Software** to enable **Software compression effort**: ultrafast,
+superfast, veryfast, faster, fast, medium, slow, slower and veryslow. Auto uses
+veryfast. Slower presets use more CPU time for compression efficiency. AV1 exposes
+its numeric effort presets (lower numbers are slower); Auto uses 10. Hardware
+VideoToolbox encoding does not expose the x264/x265 speed presets.
 
 ## HDR
 
@@ -200,4 +224,4 @@ remain visible so the app can explain an incompatible selection.
 
 See [BUILD.md](BUILD.md#output-combination-audit) for the output-matrix runner.
 
-[0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
+[0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)

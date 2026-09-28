@@ -92,3 +92,9 @@ of modes follows the report directory. Each failed case is retained in JSONL and
 makes the runner exit nonzero. Hardware tests require normal VideoToolbox access;
 a sandbox denial is not a device capability result. These short fixtures check
 compatibility, not extended real-time throughput.
+
+The 0.5.0 cadence regression also checks decoded source-frame content under jitter:
+
+```sh
+python3 Tests/JitterCadenceIntegration.py "/path/to/Elgato Recorder.app/Contents/MacOS/MediaHelper"
+```

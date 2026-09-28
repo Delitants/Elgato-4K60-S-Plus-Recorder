@@ -1,28 +1,27 @@
-# Elgato Recorder 0.4.1 (experimental)
+# Elgato 4K60 S+ Recorder 0.5.0
 
 Native macOS ARM and Intel builds. Requires macOS 26+; NDI runtime is bundled.
 
 ![Elgato Game Capture 4K60 S+](https://raw.githubusercontent.com/Delitants/Elgato-4K60-S-Plus-Recorder/main/docs/images/elgato-4k60-s-plus.png)
 
-![Elgato Recorder on macOS with live video and HDMI audio preview](https://raw.githubusercontent.com/Delitants/Elgato-4K60-S-Plus-Recorder/main/docs/images/elgato-recorder.png)
+![Elgato Recorder live preview (0.4.1 interface)](https://raw.githubusercontent.com/Delitants/Elgato-4K60-S-Plus-Recorder/main/docs/images/elgato-recorder.png)
 
-- Fixed false recording overloads caused by interleaved audio/video timestamps.
-  Queue age now measures monotonic waiting time, with a bounded two-second
-  cold-start allowance and the existing 64 MB memory limit.
-- Replaced blurred legacy settings tabs with native segmented navigation.
-- Explicit Software encoding consistently uses the bundled x264/x265 encoder
-  across containers, fixing software HEVC recording failures in MOV/MP4.
-- Hardware H.264/AVC B-frames now show a warning and are rejected before recording.
-  On the tested Mac they produce invalid decode timestamps. Select Disabled or
-  use Software encoding. Hardware HEVC B-frames remain available.
-- Final elapsed time updates after queued recording data finishes writing.
-- Backend failures retain the actual encoder diagnostic after output drains.
-- Added a production-pipeline output matrix with frame-count, decode, lossless
-  audio, profile and scaling checks. See VALIDATION.md for results and limits.
+- Corrected jitter-induced frame selection during FPS conversion. Selection now
+  follows the measured source cadence, so 60→30 uses every second source frame.
+- Stop after can be changed during recording and stays anchored to the first
+  accepted video keyframe. Disabling/re-enabling it does not restart the timer.
+- Replaced USB bytes received with MB written across the recording's split files.
+- Added the app icon, negotiated USB speed badge, orange warnings, Audio preview
+  label, and responsive horizontal stereo dBFS meter with peak hold.
+- Capture bitrate is now a codec-bounded target menu with a clear distinction
+  from USB link speed. USB 3 is required; USB 2 capture is unsupported.
+- Made software compression effort presets and their hardware limitations explicit.
 
-Intel tests use Rosetta, not physical Intel hardware. Builds are ad-hoc signed,
-not notarized. Short matrix fixtures establish compatibility, not sustained
-performance at every resolution, frame rate, bitrate and compression preset.
-Physical HDR display validation remains unverified.
+See the [validation notes](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/VALIDATION.md)
+and [research sources](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/SOURCES.md).
+The screenshot above is the user-supplied 0.4.1 capture; 0.5.0 adds the new controls.
 
-[Research sources and development provenance](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/SOURCES.md) documents upstream USB research, vendor references and dependency inputs.
+Intel validation uses Rosetta, not a physical Intel Mac. Builds are ad-hoc signed,
+not notarized. Non-divisible FPS conversions preserve original-frame cadence;
+this release does not synthesize motion-interpolated frames. Physical HDMI input
+resolution/timing detection and HDR transcoding remain unsupported.

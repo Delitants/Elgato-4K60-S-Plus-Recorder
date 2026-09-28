@@ -4,7 +4,9 @@ struct CaptureState {
     var connected=false,connecting=false,recording=false,saving=false
     var status="Ready",detail="Connect the 4K60 S+ using USB 3.0."
     var videoFrames=0,audioFrames=0,discarded=0,bytes=0
+    var writtenBytes:Int64=0,usbSpeed=0
     var seconds:Double=0,peak:Double=0
+    var peakLeft:Double=0,peakRight:Double=0
     var format="Waiting for HDMI video"
     var remaining:Double?
     var monitoringError:String?
@@ -28,7 +30,8 @@ final class CaptureEngine {
     private func change(_ body:(inout CaptureState)->Void){lock.lock();body(&state);lock.unlock()}
     func connect(){
         lock.lock();guard !workerActive else{lock.unlock();return};running=true;workerActive=true
-        requestedURL=nil;stopRequested=false;let lastFile=state.lastFile;state=CaptureState();state.lastFile=lastFile
+        requestedURL=nil;stopRequested=false;let lastFile=state.lastFile,lastWrittenBytes=state.writtenBytes
+        state=CaptureState();state.lastFile=lastFile;state.writtenBytes=lastWrittenBytes
         state.connecting=true;state.status="Connecting…";state.detail="Opening the Elgato capture interface…";lock.unlock()
         worker.async{self.run()}
     }
@@ -46,13 +49,14 @@ final class CaptureEngine {
         requestedURL=url;requestedLimit=limit;state.recording=true
     }
     func stopRecording(){lock.lock();stopRequested=true;lock.unlock()}
+    func setRecordingLimit(_ seconds:Double){lock.lock();requestedLimit=seconds.isFinite ? max(0,seconds):0;lock.unlock()}
     private func finish(_ recorder:RecordingSink){
         change{$0.seconds=recorder.duration;$0.recording=false;$0.remaining=nil;$0.saving=true;$0.status="Saving recording…"}
 
         recorder.finish{url,error in
             self.change{ s in
                 // Finalization drains the recording queue; sample the final duration now.
-                s.seconds=recorder.duration;s.saving=false
+                s.seconds=recorder.duration;s.writtenBytes=recorder.writtenBytes;s.saving=false
                 let result=RecordingCompletion(url:url,error:error)
                 if let url=result.url{s.lastFile=url};s.status=result.status;s.detail=result.detail
             }
@@ -73,7 +77,7 @@ final class CaptureEngine {
             }
         }
         guard let usb=opened else {
-            change{$0.connecting=false;$0.connected=false;$0.status="Connection failed";$0.detail=String(cString:error)}
+            change{$0.connecting=false;$0.connected=false;$0.usbSpeed=Int(capture_last_usb_speed());$0.status="Connection failed";$0.detail=String(cString:error)}
             lock.lock();running=false;workerActive=false;let completion=quitCompletion;quitCompletion=nil;lock.unlock();completion?();return
         }
         let parser=PacketParser(),converter=MediaConverter(hevc:profile.captureHEVC)
@@ -89,7 +93,7 @@ final class CaptureEngine {
             self.lock.lock()
             if effective.fps<incoming.fps-0.01 {
                 let pts=CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value
-                guard let selected=previewSelector.select(timestamp:pts,rate:effective) else{self.lock.unlock();return}
+                guard let selected=previewSelector.select(timestamp:pts,rate:effective,sourceRate:incoming) else{self.lock.unlock();return}
                 var timing=CMSampleTimingInfo(duration:effective.duration,presentationTimeStamp:CMTime(value:selected,timescale:1_000_000),decodeTimeStamp:.invalid)
                 var adjusted:CMSampleBuffer?
                 if CMSampleBufferCreateCopyWithNewTiming(allocator:kCFAllocatorDefault,sampleBuffer:sample,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleBufferOut:&adjusted)==noErr,let adjusted{output=adjusted}
@@ -102,9 +106,10 @@ final class CaptureEngine {
         let monitor=AudioMonitor()
         let timing=CaptureTiming()
         var deadline=RecordingDeadline()
+        var meter=StereoPeakMeter()
         var recorder:RecordingSink?,buffer=[UInt8](repeating:0,count:16384)
-        var lastFrame=Date(),lastStats=Date.distantPast,videoCount=0,audioCount=0,bytes=0,peak:Double=0
-        change{$0.connected=true;$0.connecting=false;$0.status="Waiting for HDMI…";$0.detail="Capture device connected at USB 3 speed."}
+        var lastFrame=Date(),lastStats=Date.distantPast,videoCount=0,audioCount=0,bytes=0
+        change{$0.connected=true;$0.connecting=false;$0.usbSpeed=Int(capture_last_usb_speed());$0.status="Waiting for HDMI…";$0.detail="Capture device connected."}
         var terminalError:String?
         var lastDiagnostics = ProcessInfo.processInfo.systemUptime
         while true {
@@ -112,14 +117,15 @@ final class CaptureEngine {
             lock.lock();let keepRunning=running;let url=requestedURL;requestedURL=nil;let stop=stopRequested;stopRequested=false;let limit=requestedLimit;let showVideo=videoPreview;let listen=audioPreview;let volume=monitorVolume;lock.unlock()
             timing.observe("controlLock",seconds:ProcessInfo.processInfo.systemUptime-loopStart)
             if !keepRunning{break}
+            if let startedAt=recorder?.startedAt{deadline.start(seconds:limit,now:startedAt)}
             if let r=recorder,r.error != nil{finish(r);recorder=nil;deadline.clear()}
             timing.measure("audioConfigure"){monitor.configure(enabled:listen,volume:volume);change{$0.monitoringError=monitor.error}}
             if stop || deadline.expired(now:ProcessInfo.processInfo.systemUptime),let r=recorder{finish(r);recorder=nil;deadline.clear()}
             if stop && recorder==nil {change{$0.recording=false}}
             if let url,!stop,recorder==nil {
                 recorder=RecordingSink(url:url,profile:profile,initialRate:converter.frameTiming.rate)
-                deadline.start(seconds:limit,now:ProcessInfo.processInfo.systemUptime)
-                change{$0.recording=true;$0.seconds=0;$0.status="Waiting for keyframe…";$0.detail="Recording will begin on the next video keyframe."}
+                deadline.clear()
+                change{$0.recording=true;$0.seconds=0;$0.writtenBytes=0;$0.remaining=nil;$0.status="Waiting for keyframe…";$0.detail="Recording will begin on the next video keyframe."}
             }
             let n=timing.measure("usbRead"){capture_read(usb,&buffer,Int32(buffer.count))}
             if n<0{terminalError="USB capture ended (error \(n)). Reconnect the device, then click Connect.";break}
@@ -135,17 +141,17 @@ final class CaptureEngine {
                             if showVideo || ndiOutput != nil {timing.measure("videoDecodeSubmit"){decoder.decode(sample,key:key)}} else {decoder.close()}
                         }else{
                             timing.measure("audioPlaybackSubmit"){monitor.append(frame.data,timestamp:frame.timestamp)};timing.measure("ndiAudioSubmit"){ndiOutput?.offerAudio(frame)}
-                            audioCount+=frame.data.count/4;var maxValue=0
-                            frame.data.withUnsafeBytes{raw in
-                                let b=raw.bindMemory(to:UInt8.self)
-                                for i in stride(from:0,to:b.count-1,by:2){maxValue=max(maxValue,abs(Int(Int16(bitPattern:UInt16(b[i])|UInt16(b[i+1])<<8))))}
-                            };peak=max(peak,Double(maxValue)/32768)
+                            audioCount+=frame.data.count/4;meter.append(frame.data)
                         }
                     }catch{if let r=recorder {finish(r);recorder=nil;deadline.clear()};change{$0.status="Media error";$0.detail=error.localizedDescription}}
                 }
             }
             timing.observe("captureIteration",seconds:ProcessInfo.processInfo.systemUptime-loopStart)
+            if let levels=meter.take(now:ProcessInfo.processInfo.systemUptime){
+                change{$0.peakLeft=levels.left;$0.peakRight=levels.right;$0.peak=max(levels.left,levels.right)}
+            }
             if Date().timeIntervalSince(lastStats)>0.2 {
+                recorder?.refreshWrittenBytes()
                 #if CAPTURE_DIAGNOSTICS
                 if ProcessInfo.processInfo.systemUptime - lastDiagnostics > 5 {
                     var metrics: [String:Any] = monitor.diagnostics
@@ -161,7 +167,8 @@ final class CaptureEngine {
                 let stale=Date().timeIntervalSince(lastFrame)>3
                 change{ s in
                     if let ndiOutput{s.ndiStatus=ndiOutput.status}
-                    s.videoFrames=videoCount;s.audioFrames=audioCount;s.bytes=bytes;s.peak=peak
+                    s.videoFrames=videoCount;s.audioFrames=audioCount;s.bytes=bytes
+                    if let recorder{s.writtenBytes=recorder.writtenBytes}
                     s.discarded=parser.discarded+(recorder?.dropped ?? 0)
                     s.seconds=recorder?.duration ?? s.seconds
                     s.remaining=deadline.remaining(now:ProcessInfo.processInfo.systemUptime)
@@ -175,7 +182,7 @@ final class CaptureEngine {
                     if stale{s.status="Waiting for HDMI…";s.detail="No recent video. Check the source and HDMI cable."}
                     else if let r=recorder,r.videoFrames>0{s.status="Recording";s.detail="Saving video and HDMI audio to \(profile.fileExtension.uppercased())."}
                     else if recorder==nil && s.status=="Waiting for HDMI…"{s.status="Live preview";s.detail="Ready to record video and HDMI audio."}
-                };peak*=0.5;lastStats=Date()
+                };lastStats=Date()
             }
         }
         monitor.stop();ndiOutput?.stop()
@@ -183,7 +190,7 @@ final class CaptureEngine {
         decoder.close()
         if let r=recorder{finish(r)}
         while snapshot().0.saving {Thread.sleep(forTimeInterval:0.02)}
-        change{$0.connected=false;$0.connecting=false;$0.recording=false;$0.peak=0
+        change{$0.connected=false;$0.connecting=false;$0.recording=false;$0.peak=0;$0.peakLeft=0;$0.peakRight=0;$0.usbSpeed=0
             $0.status=terminalError==nil ? "Disconnected" : "Device disconnected"
             $0.detail=terminalError ?? "Capture stopped. Saved recordings are available in your chosen folder."
         }

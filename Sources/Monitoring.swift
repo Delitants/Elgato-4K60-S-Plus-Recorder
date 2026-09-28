@@ -1,11 +1,36 @@
 import Foundation
 import AVFoundation
 
+/// Capture-worker meter; independent of playback volume and the audio render callback.
+struct StereoPeakMeter {
+ private var left=0,right=0,lastPublication:Double?
+ mutating func append(_ data:Data) {
+  data.withUnsafeBytes{raw in
+   let bytes=raw.bindMemory(to:UInt8.self)
+   for offset in stride(from:0,to:bytes.count-bytes.count%4,by:4) {
+    left=max(left,abs(Int(Int16(bitPattern:UInt16(bytes[offset])|UInt16(bytes[offset+1])<<8))))
+    right=max(right,abs(Int(Int16(bitPattern:UInt16(bytes[offset+2])|UInt16(bytes[offset+3])<<8))))
+   }
+  }
+ }
+ mutating func take(now:Double)->(left:Double,right:Double)? {
+  if let lastPublication,now-lastPublication<0.02{return nil}
+  lastPublication=now
+  defer{left=0;right=0}
+  return (Double(left)/32768,Double(right)/32768)
+ }
+}
+
 /// A duration limit uses monotonic time, so loss of HDMI and clock changes cannot extend it.
 struct RecordingDeadline {
+    private var startedAt: Double?
     private(set) var end: Double?
-    mutating func start(seconds: Double, now: Double) { end = seconds > 0 ? now + seconds : nil }
-    mutating func clear() { end = nil }
+    // Repeated updates change the duration while retaining the accepted keyframe's time.
+    mutating func start(seconds: Double, now: Double) {
+        if startedAt == nil { startedAt = now }
+        end = seconds.isFinite && seconds > 0 ? startedAt! + seconds : nil
+    }
+    mutating func clear() { startedAt = nil; end = nil }
     func remaining(now: Double) -> Double? { end.map { max(0, $0 - now) } }
     func expired(now: Double) -> Bool { end.map { now >= $0 } ?? false }
 }

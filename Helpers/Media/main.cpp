@@ -113,9 +113,12 @@ class Recorder {
    if((num("split")==1&&pts-segmentStart>=int64_t(num("splitValue"))*1000000)||(num("split")==2&&bytes>=int64_t(num("splitValue"))*1000000))splitPending=true;
    if(splitPending&&key)splitReady=true;
   }
-  if(!copy && av_cmp_q(outputRate,sourceRate)<0){
+  if(!copy){
    if(selectionOrigin==AV_NOPTS_VALUE)selectionOrigin=pts;
-   int64_t slot=av_rescale_q_rnd(pts-selectionOrigin+1,US,av_inv_q(outputRate),AV_ROUND_DOWN);
+   // Device PTS has sub-frame jitter. First recover the source frame position;
+   // otherwise 60→30 may select frames 0,3,4,7 instead of 0,2,4,6.
+   int64_t tick=av_rescale_q_rnd(pts-selectionOrigin,US,av_inv_q(sourceRate),AV_ROUND_NEAR_INF);
+   int64_t slot=av_rescale_q_rnd(tick,av_inv_q(sourceRate),av_inv_q(outputRate),AV_ROUND_DOWN);
    if(slot<=lastSlot){flushAudioUntil(pts);return;}
    lastSlot=slot;pts=selectionOrigin+av_rescale_q(slot,av_inv_q(outputRate),US);
   }

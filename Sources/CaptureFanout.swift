@@ -1,4 +1,38 @@
 import Foundation
+
+/// Logical output sizes, measured only by the serial recording queue.
+final class RecordingFileBytes {
+ private let url:URL,split:Bool,existing:Set<String>
+ private var part=1,completed:Int64=0
+ init(url:URL,split:Bool) {
+  self.url=url;self.split=split
+  // Both writers reject an existing output. Snapshot names once before any write;
+  // never enumerate a large output folder during normal capture.
+  if split{existing=Set((try? FileManager.default.contentsOfDirectory(atPath:url.deletingLastPathComponent().path)) ?? [])}
+  else{existing=FileManager.default.fileExists(atPath:url.path) ? [url.lastPathComponent]:[]}
+ }
+ private func partURL(_ number:Int)->URL {
+  url.deletingLastPathComponent().appendingPathComponent(url.deletingPathExtension().lastPathComponent+String(format:"_part%03d",number)+"."+url.pathExtension)
+ }
+ private func size(_ file:URL)->Int64? {
+  guard !existing.contains(file.lastPathComponent),
+   let attributes=try? FileManager.default.attributesOfItem(atPath:file.path),
+   attributes[.type] as? FileAttributeType == .typeRegular,
+   let bytes=attributes[.size] as? NSNumber else{return nil}
+  return bytes.int64Value
+ }
+ func measure()->Int64 {
+  guard split else{return size(url) ?? 0}
+  guard var currentSize=size(partURL(part)) else{return completed}
+  while let nextSize=size(partURL(part+1)) {
+   // The helper closes and flushes each part before creating the next one.
+   // Re-stat after seeing that next file so the accumulated size includes its trailer.
+   completed+=size(partURL(part)) ?? currentSize
+   part+=1;currentSize=nextSize
+  }
+  return completed+currentSize
+ }
+}
 // Includes the item being processed: a blocked pipe cannot hide outside this budget.
 final class QueueBudget {
  private let lock=NSLock(), maxBytes:Int, maxAge:UInt64

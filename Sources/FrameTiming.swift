@@ -54,13 +54,16 @@ final class FrameRateTracker {
 /// it never duplicates frames or changes the timeline's speed.
 struct FrameSelector {
     private var origin:Int64?,lastSlot:Int64 = -1,lastPTS:Int64?,rate:VideoRate?
-    mutating func select(timestamp:Int64,rate:VideoRate)->Int64? {
+    mutating func select(timestamp:Int64,rate:VideoRate,sourceRate:VideoRate?=nil)->Int64? {
         if self.rate != rate || (lastPTS != nil && timestamp<lastPTS!) {origin=nil;lastSlot = -1;self.rate=rate}
         lastPTS=timestamp
         if origin==nil{origin=timestamp}
         let elapsed=timestamp-origin!
-        // One microsecond tolerance handles quantized device timestamps.
-        let slot=Int64((Double(elapsed)+1)*Double(rate.numerator)/(1e6*Double(rate.denominator)))
+        // Quantize jittered device timestamps to the measured source cadence first.
+        // Selecting directly on raw PTS can alternate 3/1 source-frame steps at 60→30.
+        let source=sourceRate ?? rate
+        let tick=(Double(elapsed)*Double(source.numerator)/(1e6*Double(source.denominator))).rounded()
+        let slot=Int64(floor(tick*Double(source.denominator)*Double(rate.numerator)/(Double(source.numerator)*Double(rate.denominator))+1e-9))
         guard slot>lastSlot else{return nil};lastSlot=slot
         return origin!+Int64((Double(slot)*1e6*Double(rate.denominator)/Double(rate.numerator)).rounded())
     }

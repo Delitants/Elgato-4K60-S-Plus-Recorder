@@ -1,5 +1,8 @@
 # Validation — 2026-09-27
 
+Current update: [0.5.0 cadence, controls and live recording validation](docs/VALIDATION-0.5.0.md).
+Earlier results below are historical and retain their original scope.
+
 Target: Apple M1 Pro, 16 GB RAM, macOS 27.0 (26A428).
 Device: Elgato Game Capture 4K60 S+, model 20GAP9901,
 USB 0fd9:0075, bcdDevice 0404, negotiated link 5 Gbps.

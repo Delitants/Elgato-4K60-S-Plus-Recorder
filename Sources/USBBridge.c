@@ -3,6 +3,9 @@
 #include <libusb.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdatomic.h>
+static atomic_int last_usb_speed=LIBUSB_SPEED_UNKNOWN;
+int capture_last_usb_speed(void){return atomic_load(&last_usb_speed);}
 struct CaptureHandle { libusb_context *context; libusb_device_handle *device; int claimed; int enabled; };
 static int write_control(CaptureHandle*h,int request,int value,unsigned char*data,int size){
  int r=libusb_control_transfer(h->device,0x41,request,value,0,data,size,1200);
@@ -21,6 +24,7 @@ void capture_close(CaptureHandle*h){
 }
 CaptureHandle *capture_open(char*error,int size){return capture_open_config(0,1920,1080,40,error,size);}
 CaptureHandle *capture_open_config(int hevc,int width,int height,int mbps,char*error,int size){
+ atomic_store(&last_usb_speed,LIBUSB_SPEED_UNKNOWN);
  if((hevc!=0&&hevc!=1)||(width!=1920&&width!=3840)||(height!=1080&&height!=2160)||mbps<1||mbps>(hevc?140:200)){snprintf(error,size,"Invalid capture profile");return NULL;}
  CaptureHandle*h=calloc(1,sizeof(*h));if(!h){snprintf(error,size,"Out of memory");return NULL;}
  char stage_buffer[80];
@@ -29,7 +33,8 @@ CaptureHandle *capture_open_config(int hevc,int width,int height,int mbps,char*e
  h->device=libusb_open_device_with_vid_pid(h->context,0x0fd9,0x0075);
  if(!h->device)h->device=libusb_open_device_with_vid_pid(h->context,0x0fd9,0x0068);
  if(!h->device){snprintf(error,size,"Cannot open 4K60 S+. Check USB connection and close other capture apps.");capture_close(h);return NULL;}
- if(libusb_get_device_speed(libusb_get_device(h->device))<LIBUSB_SPEED_SUPER){snprintf(error,size,"USB 3 connection required. Use a 5 Gbps data cable.");capture_close(h);return NULL;}
+ int speed=libusb_get_device_speed(libusb_get_device(h->device));atomic_store(&last_usb_speed,speed);
+ if(speed<LIBUSB_SPEED_SUPER){snprintf(error,size,"USB 3 connection required. Use a 5 Gbps data cable.");capture_close(h);return NULL;}
  int cfg=0;stage="Read USB configuration";r=libusb_get_configuration(h->device,&cfg);if(r<0)goto fail;
  if(cfg!=2){stage="Select USB configuration";r=libusb_set_configuration(h->device,2);if(r<0)goto fail;}
  stage="Claim USB capture interface";r=libusb_claim_interface(h->device,0);if(r<0)goto fail;h->claimed=1;
