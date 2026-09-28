@@ -24,3 +24,5 @@ Intel tests use Rosetta, not physical Intel hardware. Builds are ad-hoc signed,
 not notarized. Short matrix fixtures establish compatibility, not sustained
 performance at every resolution, frame rate, bitrate and compression preset.
 Physical HDR display validation remains unverified.
+
+[Research sources and development provenance](https://github.com/Delitants/ElgatoRecorder-macOS/blob/main/SOURCES.md) documents upstream USB research, vendor references and dependency inputs.

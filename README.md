@@ -161,8 +161,13 @@ and the licenses shipped inside the app. GPL/LGPL source, rebuild, and library
 replacement rights apply to their respective components; NDI terms do not apply
 to those open-source components.
 
+## Research sources and acknowledgments
+
 USB interoperability work builds on [Saddytech/elgato4k60sp-linux](https://github.com/Saddytech/elgato4k60sp-linux)
 and [Elgato's public device-support examples](https://github.com/elgatosf/capture-device-support).
+See [Sources and development provenance](SOURCES.md) for specific upstream files,
+the retained reference revision, local device findings, dependency sources and
+the Windows-driver provenance limitation.
 
 Live release testing found that AV1 1080p60 with 4K input and NDI could not keep up
 on the loaded M1 Pro. The app reports overload and retains the partial file.
