@@ -2,6 +2,10 @@
 
 Native macOS ARM and Intel builds. Requires macOS 26+; NDI runtime is bundled.
 
+![Elgato Game Capture 4K60 S+](https://raw.githubusercontent.com/Delitants/ElgatoRecorder-macOS/main/docs/images/elgato-4k60-s-plus.png)
+
+![Elgato Recorder on macOS with a completed recording](https://raw.githubusercontent.com/Delitants/ElgatoRecorder-macOS/main/docs/images/elgato-recorder.png)
+
 - Fixed false recording overloads caused by interleaved audio/video timestamps.
   Queue age now measures monotonic waiting time, with a bounded two-second
   cold-start allowance and the existing 64 MB memory limit.

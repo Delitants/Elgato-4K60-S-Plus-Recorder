@@ -6,9 +6,9 @@ experimental support for a device that Elgato does not officially support on mac
 
 [Download ARM or Intel releases](https://github.com/Delitants/ElgatoRecorder-macOS/releases)
 
-![Native recording settings](docs/images/recording-settings.png)
+![Elgato Game Capture 4K60 S+](docs/images/elgato-4k60-s-plus.png)
 
-The screenshot shows the 0.3 settings layout; 0.4 adds FPS controls and 0.4.1 uses crisper segmented navigation.
+![Elgato Recorder on macOS with a completed recording](docs/images/elgato-recorder.png)
 
 ## Install
 
