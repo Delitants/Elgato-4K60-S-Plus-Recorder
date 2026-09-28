@@ -77,6 +77,18 @@ in blue. USB 2.0 is identified but capture remains unsupported. The capture bitr
 menu chooses an **encoder target**, not USB bandwidth; a faster host port does
 not create additional device modes. Existing valid custom targets are preserved.
 
+The header also shows **Device video: … Mbps received** beside the requested
+encoder target. This measures reassembled compressed video payload before decoding,
+preview, FPS selection or recording, excluding audio and USB headers/padding.
+It uses completed 100 ms buckets over a rolling 3-second window, with a one-second
+warmup. A target is not a firmware readback or a guarantee of constant bitrate.
+A lower measured rate alone does not prove the target was ignored.
+
+HEVC capture requests 10-bit video, but cannot recover smooth gradients already
+lost in the source or HDMI signal. Codec/bit-depth text is taken from the received
+format description (bit depth is omitted if unavailable). Preview requests 10-bit
+pixel buffers for HEVC; the final display path and source precision are separate.
+
 ## Frame rate and downsampling
 
 **Settings → Video → Output FPS** applies to video preview, recording, and NDI.
@@ -96,8 +108,9 @@ recording so its timing metadata remains consistent; start a new recording.
 
 Physical HDMI input timing is not exposed by a verified USB status field in this
 implementation. If the device repeats a 30 fps HDMI source into a 60 fps encoded
-stream, set **Capture → Source FPS override → 30 fps**. This caps processing at
+stream, set **Capture → Source cadence cap → 30 fps**. This caps processing at
 the rate you specify; it does not change or verify the device's HDMI input mode.
+**Incoming** remains the measured device stream rate; **Output** reflects the cap.
 A game rendering 30 fps over a 60 Hz HDMI signal still supplies a 60 Hz signal.
 
 **Original device stream** preserves every compressed frame. If the effective
@@ -224,4 +237,4 @@ remain visible so the app can explain an incompatible selection.
 
 See [BUILD.md](BUILD.md#output-combination-audit) for the output-matrix runner.
 
-[0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
+[0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)

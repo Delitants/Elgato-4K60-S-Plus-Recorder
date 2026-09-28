@@ -1,6 +1,7 @@
 # Validation — 2026-09-27
 
-Current update: [0.5.0 cadence, controls and live recording validation](docs/VALIDATION-0.5.0.md).
+Current update: [0.5.1 incoming bitrate and format validation](docs/VALIDATION-0.5.1.md).
+Previous: [0.5.0 cadence, controls and live recording validation](docs/VALIDATION-0.5.0.md).
 Earlier results below are historical and retain their original scope.
 
 Target: Apple M1 Pro, 16 GB RAM, macOS 27.0 (26A428).

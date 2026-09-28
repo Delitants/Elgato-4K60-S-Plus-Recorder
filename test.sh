@@ -25,6 +25,8 @@ xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/Completion.swift Tests
 "$TEST_DIR/completion-tests"
 xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/CaptureFanout.swift Tests/FanoutTests.swift -o "$TEST_DIR/fanout-tests"
 "$TEST_DIR/fanout-tests"
+xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/CaptureFanout.swift Tests/BitrateTests.swift -o "$TEST_DIR/bitrate-tests"
+"$TEST_DIR/bitrate-tests"
 ffmpeg -v error -f lavfi -i testsrc2=size=160x90:rate=30 -frames:v 1 -c:v libx264 -f h264 "$TEST_DIR/frame.h264"
 xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/FrameTiming.swift Sources/Profiles.swift Sources/Media.swift Sources/PacketParser.swift Sources/Completion.swift Sources/CaptureFanout.swift Sources/MediaHelperClient.swift Sources/RecordingSink.swift Tests/FrameTimingTests.swift -o "$TEST_DIR/timing-tests"
 "$TEST_DIR/timing-tests" "$TEST_DIR/frame.h264"

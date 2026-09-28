@@ -60,3 +60,16 @@ NDISender's internal header is now 32 bytes: type/size/width/height uint32, sign
 PTS microseconds int64, FPS numerator/denominator uint32, all little-endian. Video
 requires a positive rate; audio has zero FPS fields. The app and helper must be
 updated together. Legacy 24-byte sender messages are not compatible.
+
+## Measured encoder bitrate (0.5.1)
+
+The register 0x50 target is a request, not a firmware readback or a guaranteed
+constant output rate. Short live 1080p59.94 tests produced about 5.25 Mbps AVC
+at requested 20/200 Mbps and 9.27 Mbps HEVC at requested 20/140 Mbps. Requesting
+1 Mbps reduced output to about 1.01 Mbps AVC / 0.92 Mbps HEVC. This confirms
+a response to bitrate configuration, but does not verify every requested upper
+limit or quality behavior. See docs/VALIDATION-0.5.1.md for scope.
+
+The GUI measures 0xc1 elementary video payload bytes before decoding or output
+frame selection, excluding protocol headers, padding and PCM. It reports received
+throughput over completed 100 ms buckets in a rolling 3-second window.

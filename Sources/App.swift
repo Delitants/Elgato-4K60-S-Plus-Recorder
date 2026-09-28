@@ -65,6 +65,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
     let status=NSTextField(labelWithString:"Connecting…")
     let detail=NSTextField(wrappingLabelWithString:"Opening your Elgato 4K60 S+.")
     let format=NSTextField(labelWithString:"Waiting for video")
+    let bitrate=NSTextField(wrappingLabelWithString:"Device video bitrate · waiting for connection")
     let clock=NSTextField(labelWithString:"00:00")
     let stats=NSTextField(labelWithString:"")
     let audioLabel=NSTextField(labelWithString:"HDMI audio · awaiting packets")
@@ -104,6 +105,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         let connectionStatus=NSStackView(views:[usbBadge,status]);connectionStatus.orientation = .vertical;connectionStatus.alignment = .trailing;connectionStatus.spacing=6
         let top=NSStackView(views:[icon,identity,NSView(),connectionStatus]);top.orientation = .horizontal;top.distribution = .fill;top.spacing=12
         format.font = .monospacedSystemFont(ofSize:12,weight:.regular);format.textColor = .secondaryLabelColor
+        bitrate.font = .monospacedDigitSystemFont(ofSize:12,weight:.medium)
+        bitrate.toolTip="Measured compressed video received from the device, averaged over up to 3 seconds. Excludes audio and USB headers/padding. Independent of preview, output FPS and recording bitrate. The requested encoder target is not a confirmed firmware readback; actual bitrate depends on the device and picture content."
+        let signal=NSStackView(views:[format,bitrate]);signal.orientation = .vertical;signal.alignment = .leading;signal.spacing=5
+        bitrate.widthAnchor.constraint(equalTo:signal.widthAnchor).isActive=true
         clock.font = .monospacedDigitSystemFont(ofSize:30,weight:.medium)
         detail.textColor = .secondaryLabelColor;detail.font = .systemFont(ofSize:12);detail.maximumNumberOfLines=2
         let timerColumn=NSStackView(views:[clock,detail]);timerColumn.orientation = .vertical;timerColumn.alignment = .leading;timerColumn.spacing=4
@@ -133,9 +138,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         durationField.toolTip="Hours:minutes:seconds from the actual recording start. Edit during recording and press Return to update the total limit; turning Stop after off removes it."
         countdown.font = .monospacedDigitSystemFont(ofSize:12,weight:.medium)
         let durationControls=NSStackView(views:[durationToggle,durationField,NSTextField(labelWithString:"hh:mm:ss"),countdown,NSView()]);durationControls.spacing=10
-        let stack=NSStackView(views:[top,format,preview,previewControls,info,durationControls,controls,folderLabel,stats]);stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=14;stack.translatesAutoresizingMaskIntoConstraints=false;root.addSubview(stack)
+        let stack=NSStackView(views:[top,signal,preview,previewControls,info,durationControls,controls,folderLabel,stats]);stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=14;stack.translatesAutoresizingMaskIntoConstraints=false;root.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:root.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:root.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:root.topAnchor,constant:20),stack.bottomAnchor.constraint(equalTo:root.bottomAnchor,constant:-18),preview.heightAnchor.constraint(greaterThanOrEqualToConstant:260)])
-        for view in [top,preview,info,controls,folderLabel,stats]{view.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive=true}
+        for view in [top,signal,preview,info,controls,folderLabel,stats]{view.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive=true}
         preview.setContentHuggingPriority(.defaultLow,for:.vertical)
         window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
         // Poll for newly selected frames up to 60 Hz. snapshot consumes each frame once;
@@ -161,6 +166,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         usbBadge.layer?.borderColor=(s.usbSpeed>=4 ? NSColor.systemBlue:NSColor.separatorColor).cgColor
         usbBadge.toolTip=usbUnsupported ? "USB 2 is unsupported. Connect the 4K60 S+ directly using a USB 3 cable and port.":"USB 3 is required for capture; encoder bitrate is separate from USB link speed."
         detail.stringValue=s.monitoringError.map{"Audio monitoring: \($0)"} ?? (s.detail + (s.ndiStatus.map{" · " + $0} ?? ""));format.stringValue=s.format
+        if s.connected,let target=s.requestedVideoMbps {
+            let measured=s.incomingVideoMbps.map{String(format:"%.1f Mbps received",$0)} ?? "measuring…"
+            bitrate.stringValue="Device video: \(measured) · requested: \(target) Mbps · 3 s average"
+        }else{bitrate.stringValue="Device video bitrate · \(s.connecting ? "connecting…":"not connected")"}
         if usbUnsupported{detail.stringValue += " · USB 2 is unsupported; a USB 3 cable and port are required."}
         detail.textColor=warning ? .systemOrange : .secondaryLabelColor
         let seconds=Int(s.seconds);clock.stringValue=String(format:"%02d:%02d:%02d",seconds/3600,(seconds/60)%60,seconds%60)

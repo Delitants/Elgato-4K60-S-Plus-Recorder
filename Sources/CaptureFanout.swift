@@ -1,5 +1,30 @@
 import Foundation
 
+/// Received elementary video bytes, before decode, preview or recording filters.
+/// Fixed 100 ms buckets bound memory and exclude the unfinished bucket so a
+/// keyframe arriving in a short USB burst cannot produce a misleading spike.
+struct IncomingVideoBitrate {
+ private struct Bucket {var tick:Int64 = -1;var bytes:Double=0}
+ private var buckets=Array(repeating:Bucket(),count:31)
+ private var firstTick:Int64?
+ mutating func observe(type:UInt8,bytes:Int,now:Double) {
+  guard type==0xc1,bytes>0,now.isFinite,now>=0 else{return}
+  let tick=Int64(floor(now*10)),index=Int(tick%31)
+  if firstTick==nil{firstTick=tick}
+  if buckets[index].tick != tick{buckets[index]=Bucket(tick:tick)}
+  buckets[index].bytes+=Double(bytes)
+ }
+ func mbps(now:Double)->Double? {
+  guard let firstTick,now.isFinite,now>=0 else{return nil}
+  let tick=Int64(floor(now*10)),span=min(30,tick-firstTick)
+  guard span>=10 else{return nil}
+  let bytes=buckets.reduce(0.0){sum,bucket in
+   sum+(bucket.tick>=tick-span && bucket.tick<tick ? bucket.bytes:0)
+  }
+  return bytes*8/(Double(span)/10)/1_000_000
+ }
+}
+
 /// Logical output sizes, measured only by the serial recording queue.
 final class RecordingFileBytes {
  private let url:URL,split:Bool,existing:Set<String>

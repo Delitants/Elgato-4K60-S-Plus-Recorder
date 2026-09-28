@@ -8,6 +8,7 @@ struct CaptureState {
     var seconds:Double=0,peak:Double=0
     var peakLeft:Double=0,peakRight:Double=0
     var format="Waiting for HDMI video"
+    var incomingVideoMbps:Double?,requestedVideoMbps:Int?
     var remaining:Double?
     var monitoringError:String?
     var ndiStatus:String?
@@ -107,9 +108,10 @@ final class CaptureEngine {
         let timing=CaptureTiming()
         var deadline=RecordingDeadline()
         var meter=StereoPeakMeter()
+        var videoBitrate=IncomingVideoBitrate()
         var recorder:RecordingSink?,buffer=[UInt8](repeating:0,count:16384)
         var lastFrame=Date(),lastStats=Date.distantPast,videoCount=0,audioCount=0,bytes=0
-        change{$0.connected=true;$0.connecting=false;$0.usbSpeed=Int(capture_last_usb_speed());$0.status="Waiting for HDMI…";$0.detail="Capture device connected."}
+        change{$0.connected=true;$0.connecting=false;$0.requestedVideoMbps=profile.deviceMbps;$0.usbSpeed=Int(capture_last_usb_speed());$0.status="Waiting for HDMI…";$0.detail="Capture device connected."}
         var terminalError:String?
         var lastDiagnostics = ProcessInfo.processInfo.systemUptime
         while true {
@@ -133,6 +135,7 @@ final class CaptureEngine {
                 bytes+=Int(n)
                 let frames=timing.measure("packetParser"){parser.feed(Data(buffer.prefix(Int(n))))}
                 for frame in frames {
+                    videoBitrate.observe(type:frame.type,bytes:frame.data.count,now:ProcessInfo.processInfo.systemUptime)
                     do {
                         guard let(sample,key)=try timing.measure("mediaConvert",{try converter.convert(frame)}) else{continue}
                         if let r=recorder,!r.offer(frame){finish(r);recorder=nil;deadline.clear();change{$0.status="Recording error";$0.detail=r.error?.localizedDescription ?? "Recording stopped"}}
@@ -168,6 +171,7 @@ final class CaptureEngine {
                 change{ s in
                     if let ndiOutput{s.ndiStatus=ndiOutput.status}
                     s.videoFrames=videoCount;s.audioFrames=audioCount;s.bytes=bytes
+                    s.incomingVideoMbps=videoBitrate.mbps(now:ProcessInfo.processInfo.systemUptime)
                     if let recorder{s.writtenBytes=recorder.writtenBytes}
                     s.discarded=parser.discarded+(recorder?.dropped ?? 0)
                     s.seconds=recorder?.duration ?? s.seconds
@@ -176,9 +180,11 @@ final class CaptureEngine {
                         let color=transfer == (kCMFormatDescriptionTransferFunction_SMPTE_ST_2084_PQ as String) ? "HDR PQ" : transfer == (kCMFormatDescriptionTransferFunction_ITU_R_2100_HLG as String) ? "HDR HLG" : "HDR not signalled"
                         let rateText=converter.frameTiming.rate.map { incoming in
                             let effective=profile.effectiveRate(incoming:incoming)
-                            return "Incoming \(incoming.label) fps · Output \(effective.label) fps"+(profile.sourceFPS == .source ? "" : " · source override")
+                            return "Incoming \(incoming.label) fps · Output \(effective.label) fps"+(profile.sourceFPS.rate.map{" · cadence cap \($0.label)"} ?? "")
                         } ?? "Measuring incoming FPS…"
-                        s.format="Encoded \(d.width) × \(d.height) · \(profile.captureHEVC ? "HEVC Main 10" : "H.264") · \(rateText) · \(color)"}
+                        let codec=CMFormatDescriptionGetMediaSubType(format)==kCMVideoCodecType_HEVC ? "HEVC":"H.264"
+                        let depth=(CMFormatDescriptionGetExtension(format,extensionKey:kCMFormatDescriptionExtension_BitsPerComponent) as? NSNumber).map{" · \($0.intValue)-bit"} ?? ""
+                        s.format="Encoded \(d.width) × \(d.height) · \(codec)\(depth) · \(rateText) · \(color)"}
                     if stale{s.status="Waiting for HDMI…";s.detail="No recent video. Check the source and HDMI cable."}
                     else if let r=recorder,r.videoFrames>0{s.status="Recording";s.detail="Saving video and HDMI audio to \(profile.fileExtension.uppercased())."}
                     else if recorder==nil && s.status=="Waiting for HDMI…"{s.status="Live preview";s.detail="Ready to record video and HDMI audio."}
@@ -191,6 +197,7 @@ final class CaptureEngine {
         if let r=recorder{finish(r)}
         while snapshot().0.saving {Thread.sleep(forTimeInterval:0.02)}
         change{$0.connected=false;$0.connecting=false;$0.recording=false;$0.peak=0;$0.peakLeft=0;$0.peakRight=0;$0.usbSpeed=0
+            $0.incomingVideoMbps=nil;$0.requestedVideoMbps=nil
             $0.status=terminalError==nil ? "Disconnected" : "Device disconnected"
             $0.detail=terminalError ?? "Capture stopped. Saved recordings are available in your chosen folder."
         }
