@@ -34,4 +34,6 @@ xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/FrameTiming.swift Sour
 "$TEST_DIR/timing-tests" "$TEST_DIR/frame.h264"
 xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/FrameTiming.swift Sources/Profiles.swift Sources/Media.swift Sources/PacketParser.swift Tests/FrameSelectionTests.swift -o "$TEST_DIR/selection-tests"
 "$TEST_DIR/selection-tests"
+xcrun swiftc -module-cache-path "$TEST_DIR/cache" Sources/FrameTiming.swift Tests/PreviewTimingTests.swift -o "$TEST_DIR/preview-timing-tests"
+"$TEST_DIR/preview-timing-tests"
 echo "Temporary test artifacts cleaned on exit."

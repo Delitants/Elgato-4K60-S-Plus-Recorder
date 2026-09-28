@@ -6,13 +6,39 @@ final class PreviewView:NSView {
     override init(frame:NSRect){super.init(frame:frame);wantsLayer=true;layer?.backgroundColor=NSColor.black.cgColor;videoLayer.videoGravity = .resizeAspect;layer?.addSublayer(videoLayer)}
     required init?(coder:NSCoder){fatalError()}
     override func layout(){super.layout();CATransaction.begin();CATransaction.setDisableActions(true);videoLayer.frame=bounds;CATransaction.commit()}
-    func show(_ sample:CMSampleBuffer){
-        if videoLayer.status == .failed {videoLayer.flush()}
-        guard videoLayer.isReadyForMoreMediaData else{return}
-        if let a=CMSampleBufferGetSampleAttachmentsArray(sample,createIfNecessary:true){
+    private var clock=PreviewPresentationClock()
+    private var pending=PreviewFrameQueue<CMSampleBuffer>()
+    func clear(){clock.reset();pending.reset();videoLayer.sampleBufferRenderer.flush(removingDisplayedImage:true,completionHandler:nil)}
+    func show(_ samples:[CMSampleBuffer]){
+        for sample in samples{pending.append(sample,pts:CMSampleBufferGetPresentationTimeStamp(sample).seconds)}
+        while let sample=pending.first{
+            guard showFrame(sample) else{break}
+            pending.removeFirst()
+        }
+    }
+    private func showFrame(_ sample:CMSampleBuffer)->Bool{
+        let renderer=videoLayer.sampleBufferRenderer
+        #if PREVIEW_DIAGNOSTICS
+        PreviewTrace.shared.event(5,CMSampleBufferGetPresentationTimeStamp(sample).seconds,renderer.isReadyForMoreMediaData ? 0:1)
+        #endif
+        if renderer.status == .failed{renderer.flush();clock.reset()}
+        guard renderer.isReadyForMoreMediaData else{return false}
+        let pts=CMSampleBufferGetPresentationTimeStamp(sample).seconds
+        let now=CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        guard let presentation=clock.schedule(pts:pts,now:now) else{return true}
+        if presentation.reset{renderer.flush()}
+        var timing=CMSampleTimingInfo(duration:CMSampleBufferGetDuration(sample),presentationTimeStamp:CMTime(seconds:presentation.time,preferredTimescale:1_000_000),decodeTimeStamp:.invalid)
+        var adjusted:CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator:kCFAllocatorDefault,sampleBuffer:sample,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleBufferOut:&adjusted)==noErr,let adjusted else{return true}
+        if let a=CMSampleBufferGetSampleAttachmentsArray(adjusted,createIfNecessary:true){
             let d=unsafeBitCast(CFArrayGetValueAtIndex(a,0),to:CFMutableDictionary.self)
-            CFDictionarySetValue(d,Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),Unmanaged.passUnretained(kCFBooleanTrue).toOpaque())
-        };videoLayer.enqueue(sample)
+            CFDictionarySetValue(d,Unmanaged.passUnretained(kCMSampleAttachmentKey_DisplayImmediately).toOpaque(),Unmanaged.passUnretained(kCFBooleanFalse).toOpaque())
+        }
+        #if PREVIEW_DIAGNOSTICS
+        PreviewTrace.shared.event(8,pts,presentation.time)
+        PreviewTrace.shared.event(9,presentation.time-now,presentation.reset ? 1:0)
+        #endif
+        renderer.enqueue(adjusted);return true
     }
 }
 // Peak amplitude is displayed on a logarithmic dBFS scale, independent of monitor volume.
@@ -143,7 +169,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         for view in [top,signal,preview,info,controls,folderLabel,stats]{view.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive=true}
         preview.setContentHuggingPriority(.defaultLow,for:.vertical)
         window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
-        // Poll for newly selected frames up to 60 Hz. snapshot consumes each frame once;
+        // Drain the bounded preview queue up to 60 Hz. The renderer schedules each frame;
         // a 30 fps source or output therefore draws only 30 new video frames/s.
         timer=Timer(timeInterval:1.0/60,repeats:true){[weak self]_ in self?.refresh()}
         RunLoop.main.add(timer!,forMode:.common)
@@ -155,8 +181,22 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         appMenu.addItem(.separator());appMenu.addItem(withTitle:"Quit Elgato Recorder",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
         NSApp.mainMenu=main
     }
+    #if PREVIEW_DIAGNOSTICS
+    var lastPreviewTrace=0.0
+    #endif
     func refresh(){
-        let(s,frame)=engine.snapshot();current=s;if videoToggle.state == .on,let frame{preview.show(frame)}
+        #if PREVIEW_DIAGNOSTICS
+        PreviewTrace.shared.event(4)
+        let traceNow=ProcessInfo.processInfo.systemUptime
+        if traceNow-lastPreviewTrace>5 {
+            lastPreviewTrace=traceNow
+            preview.videoLayer.sampleBufferRenderer.loadVideoPerformanceMetrics{m in
+                if let m{PreviewTrace.shared.event(6,Double(m.totalNumberOfFrames),Double(m.numberOfDroppedFrames));PreviewTrace.shared.event(7,m.totalAccumulatedFrameDelay)}
+            }
+            PreviewTrace.shared.save()
+        }
+        #endif
+        let(s,frames)=engine.snapshot();current=s;if videoToggle.state == .on{preview.show(frames)}
         let usbUnsupported=s.usbSpeed>0 && s.usbSpeed<4
         let warning=usbUnsupported || s.monitoringError != nil || ["waiting","failed","error","retrying","disconnected","warning","unsupported"].contains{ s.status.localizedCaseInsensitiveContains($0) }
         status.stringValue=s.status;status.textColor=warning ? .systemOrange : (s.recording ? .systemRed : .labelColor)
@@ -191,7 +231,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
             guard let self else{return};self.profile=value
             if let data=try? JSONEncoder().encode(value){UserDefaults.standard.set(data,forKey:"recordingProfile")}
             self.engine.disconnect {DispatchQueue.main.async{
-                self.engine.setProfile(value);self.preview.videoLayer.flushAndRemoveImage();self.engine.connect()
+                self.engine.setProfile(value);self.preview.clear();self.engine.connect()
             }}
         }
         window.beginSheet(settingsController!.window)
@@ -200,7 +240,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         let video=videoToggle.state == .on,audio=audioToggle.state == .on
         volume.isEnabled=audio
         engine.setPreview(video:video,audio:audio,volume:volume.floatValue)
-        if !video { preview.videoLayer.flushAndRemoveImage() }
+        if !video { preview.clear() }
     }
     private func recordingLimit()throws->Double {
         guard durationToggle.state == .on else{return 0}
@@ -218,7 +258,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         }catch{durationValidation="Use hh:mm:ss; current limit unchanged.";durationField.textColor = .systemOrange}
     }
     func controlTextDidEndEditing(_ notification:Notification){if let field=notification.object as? NSTextField,field === durationField{durationEdited()}}
-    @objc func toggleConnection(){if current.connected{engine.disconnect()}else{preview.videoLayer.flushAndRemoveImage();engine.connect()}}
+    @objc func toggleConnection(){if current.connected{engine.disconnect()}else{preview.clear();engine.connect()}}
     @objc func toggleRecording(){
         refresh()
         if current.recording{engine.stopRecording();return}

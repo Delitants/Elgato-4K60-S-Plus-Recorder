@@ -18,18 +18,21 @@ final class CaptureEngine {
     private let lock=NSLock()
     private let worker=DispatchQueue(label:"Elgato.Capture",qos:.userInitiated)
     private var state=CaptureState(),running=false,workerActive=false
-    private var latest:CMSampleBuffer?
+    private var previewFrames=PreviewFrameQueue<CMSampleBuffer>()
     private var requestedURL:URL?,stopRequested=false
     private var videoPreview=true,audioPreview=false,monitorVolume:Float=0.7
     private var requestedLimit:Double=0
     private var profile=RecordingProfile()
     func setProfile(_ value:RecordingProfile){lock.lock();profile=value;lock.unlock()}
     private var quitCompletion:(()->Void)?
-    func snapshot()->(CaptureState,CMSampleBuffer?) {
-        lock.lock();defer{lock.unlock()};let frame=latest;latest=nil;return(state,frame)
+    func snapshot()->(CaptureState,[CMSampleBuffer]) {
+        lock.lock();defer{lock.unlock()};return(state,previewFrames.drain())
     }
     private func change(_ body:(inout CaptureState)->Void){lock.lock();body(&state);lock.unlock()}
     func connect(){
+        #if PREVIEW_DIAGNOSTICS
+        PreviewTrace.shared.reset()
+        #endif
         lock.lock();guard !workerActive else{lock.unlock();return};running=true;workerActive=true
         requestedURL=nil;stopRequested=false;let lastFile=state.lastFile,lastWrittenBytes=state.writtenBytes
         state=CaptureState();state.lastFile=lastFile;state.writtenBytes=lastWrittenBytes
@@ -42,7 +45,7 @@ final class CaptureEngine {
     }
     func setPreview(video:Bool,audio:Bool,volume:Float){
         lock.lock();videoPreview=video;audioPreview=audio;monitorVolume=volume
-        if !video { latest=nil };lock.unlock()
+        if !video { previewFrames.reset() };lock.unlock()
     }
     func startRecording(_ url:URL,limit:Double=0){
         lock.lock();defer{lock.unlock()}
@@ -100,7 +103,12 @@ final class CaptureEngine {
                 if CMSampleBufferCreateCopyWithNewTiming(allocator:kCFAllocatorDefault,sampleBuffer:sample,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleBufferOut:&adjusted)==noErr,let adjusted{output=adjusted}
                 else{self.lock.unlock();return}
             }
-            if self.videoPreview {self.latest=output}
+            if self.videoPreview {
+                #if PREVIEW_DIAGNOSTICS
+                PreviewTrace.shared.event(3,CMSampleBufferGetPresentationTimeStamp(output).seconds,0)
+                #endif
+                self.previewFrames.append(output,pts:CMSampleBufferGetPresentationTimeStamp(output).seconds)
+            }
             self.lock.unlock()
             ndiOutput?.offerVideo(output)
         }
@@ -141,6 +149,9 @@ final class CaptureEngine {
                         if let r=recorder,!r.offer(frame){finish(r);recorder=nil;deadline.clear();change{$0.status="Recording error";$0.detail=r.error?.localizedDescription ?? "Recording stopped"}}
                         if frame.type==0xc1 {
                             videoCount+=1;lastFrame=Date()
+                            #if PREVIEW_DIAGNOSTICS
+                            PreviewTrace.shared.event(1,CMSampleBufferGetPresentationTimeStamp(sample).seconds,Double(frame.data.count))
+                            #endif
                             if showVideo || ndiOutput != nil {timing.measure("videoDecodeSubmit"){decoder.decode(sample,key:key)}} else {decoder.close()}
                         }else{
                             timing.measure("audioPlaybackSubmit"){monitor.append(frame.data,timestamp:frame.timestamp)};timing.measure("ndiAudioSubmit"){ndiOutput?.offerAudio(frame)}
@@ -201,6 +212,6 @@ final class CaptureEngine {
             $0.status=terminalError==nil ? "Disconnected" : "Device disconnected"
             $0.detail=terminalError ?? "Capture stopped. Saved recordings are available in your chosen folder."
         }
-        lock.lock();running=false;workerActive=false;latest=nil;let completion=quitCompletion;quitCompletion=nil;lock.unlock();completion?()
+        lock.lock();running=false;workerActive=false;previewFrames.reset();let completion=quitCompletion;quitCompletion=nil;lock.unlock();completion?()
     }
 }

@@ -169,6 +169,9 @@ final class PreviewDecoder {
             var callback=VTDecompressionOutputCallbackRecord(decompressionOutputCallback:{ref,_,status,_,image,pts,duration in
                 guard status==noErr,let image,let ref else{return}
                 let decoder=Unmanaged<PreviewDecoder>.fromOpaque(ref).takeUnretainedValue()
+                #if PREVIEW_DIAGNOSTICS
+                PreviewTrace.shared.event(2,pts.seconds)
+                #endif
                 var format:CMVideoFormatDescription?
                 guard CMVideoFormatDescriptionCreateForImageBuffer(allocator:kCFAllocatorDefault,imageBuffer:image,formatDescriptionOut:&format)==noErr,let format else{return}
                 var timing=CMSampleTimingInfo(duration:duration,presentationTimeStamp:pts,decodeTimeStamp:.invalid)

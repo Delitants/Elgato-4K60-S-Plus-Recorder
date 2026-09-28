@@ -68,3 +68,37 @@ struct FrameSelector {
         return origin!+Int64((Double(slot)*1e6*Double(rate.denominator)/Double(rate.numerator)).rounded())
     }
 }
+
+/// Absorb short USB/decode bursts without creating an unbounded playback backlog.
+struct PreviewFrameQueue<Frame> {
+    private var entries=[(pts:Double,frame:Frame)]()
+    mutating func append(_ frame:Frame,pts:Double) {
+        guard pts.isFinite else{return}
+        if let last=entries.last,pts<last.pts{entries.removeAll(keepingCapacity:true)}
+        entries.append((pts,frame))
+        while entries.count>8 || (entries.count>1 && pts-entries[0].pts>0.12){entries.removeFirst()}
+    }
+    var first:Frame? {entries.first?.frame}
+    mutating func removeFirst(){if !entries.isEmpty{entries.removeFirst()}}
+    mutating func drain()->[Frame] {let frames=entries.map(\.frame);entries.removeAll(keepingCapacity:true);return frames}
+    mutating func reset(){entries.removeAll(keepingCapacity:true)}
+}
+
+/// Maps media timestamps to host-clock deadlines; arrival jitter is not frame timing.
+struct PreviewPresentationClock {
+    struct Presentation {let time:Double,reset:Bool}
+    private var sourceAnchor:Double?,hostAnchor=0.0,lastPTS:Double?
+    mutating func reset(){sourceAnchor=nil;lastPTS=nil}
+    mutating func schedule(pts:Double,now:Double)->Presentation? {
+        guard pts.isFinite,now.isFinite else{return nil}
+        if pts==lastPTS{return nil}
+        var restart=sourceAnchor==nil || (lastPTS != nil && pts<lastPTS!)
+        var deadline=hostAnchor+(pts-(sourceAnchor ?? pts))
+        // Recover after a pause, clock discontinuity or severe stall. Never slowly
+        // replay a stale backlog, and never let the queue grow the preview delay.
+        if deadline<now+0.005 || deadline>now+0.2{restart=true}
+        if restart{sourceAnchor=pts;hostAnchor=now+0.06;deadline=hostAnchor}
+        lastPTS=pts
+        return Presentation(time:deadline,reset:restart)
+    }
+}

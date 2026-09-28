@@ -1,4 +1,4 @@
-# Elgato 4K60 S+ Recorder 0.6.0
+# Elgato 4K60 S+ Recorder 0.6.1
 
 Native macOS ARM and Intel builds. Requires macOS 26+; NDI runtime is bundled.
 
@@ -6,34 +6,25 @@ Native macOS ARM and Intel builds. Requires macOS 26+; NDI runtime is bundled.
 
 ![Elgato Recorder live preview (0.4.1 interface)](https://raw.githubusercontent.com/Delitants/Elgato-4K60-S-Plus-Recorder/main/docs/images/elgato-recorder.png)
 
-- Added hardware constant-quality (CQ) recording for H.264 and HEVC on native
-  Apple Silicon. In Settings → Video, select Automatic or Require hardware,
-  then CQ. Hardware quality runs from 0 to 100, with a default of 65; higher
-  values favor quality over file size. It is separate from software CRF.
-- CQ uses a quality target instead of the video bitrate setting. It has no fixed
-  bitrate or file-size limit, and 100 does not mean lossless. Unsupported hardware
-  fails explicitly without switching to software or bitrate mode.
-- Intel builds retain ABR/CBR and software CRF; hardware CQ is unavailable with
-  the bundled Intel encoder implementation. Saved CQ profiles remain readable,
-  with an explicit warning before recording.
+- Fixed uneven live preview timing caused by displaying frames immediately on
+  arrival. Frames now receive host-clock display deadlines from media timestamps.
+- Bounded preview queues absorb short bursts and retry renderer backpressure.
+  Preview restarts its timeline after long stalls instead of building a backlog.
+- Recording, encoding, USB settings and NDI frame timing are unchanged.
 
-Validated both hardware codecs, MOV/MP4/MKV/MPEG-TS output, HEVC Main 10,
-FPS downsampling, quality endpoints and unsupported configurations. A native GUI
-recording from the connected device at H.264 CQ 65 produced an 8.049-second,
-3.48 MB file with 241 video frames and clean full-file decoding. That short
-scene-specific result is not a file-size or quality guarantee.
+At a requested 200 Mbps, a live run averaged 137 Mbps received and maintained
+25 fps display deadlines with no skipped slots after warmup. The renderer
+reported zero dropped frames. Hardware decode remained below 12 ms in this run.
+The old preview path showed a 24 ms 95th-percentile timing error at 25 fps.
 
-The reported high-input-bitrate preview stutter remains unresolved. A short
-capture/decode probe sustained roughly 60 incoming / 30 preview frames per
-second without growing delay, but did not isolate final display presentation.
-CQ controls recording compression and does not reduce device USB traffic.
+Output FPS still applies to preview. Converting 59.94 fps to 25 fps cannot retain
+every motion frame or create interpolation; select Match incoming stream for
+full incoming motion cadence. The small bounded pacing buffer adds preview delay
+but cannot accumulate an unbounded playback backlog.
 
-See the [validation notes](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.0.md)
-and [research sources](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/SOURCES.md).
-The screenshot is the user-supplied 0.4.1 capture; current controls differ.
-
-Intel validation uses Rosetta, not a physical Intel Mac. Builds are ad-hoc signed,
-not notarized. Non-divisible FPS conversions preserve original-frame cadence;
-this release does not synthesize motion-interpolated frames. Physical HDMI input
-resolution/timing detection and HDR transcoding remain unsupported. Gradient
-banding and USB 2 operation remain unverified.
+See [validation details](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.1.md)
+and [sources](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/SOURCES.md).
+The screenshot is the user-supplied 0.4.1 capture. Builds are ad-hoc signed, not
+notarized. Intel checks use Rosetta, not physical Intel hardware. USB 2, source
+HDMI timing detection, HDR transcoding and gradient-banding origin remain
+unverified or unsupported as described in the README.

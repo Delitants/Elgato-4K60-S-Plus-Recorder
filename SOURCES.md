@@ -89,6 +89,14 @@ The bundled encoder enables QSCALE on native Apple Silicon and translates its
 quality value to the VideoToolbox 0–1 range. This platform restriction is reflected
 in the UI and helper; it is not a claim that all Intel hardware lacks quality controls.
 
+## Preview presentation timing
+
+Apple's [sample enqueue documentation](https://developer.apple.com/documentation/avfoundation/avsamplebufferdisplaylayer/enqueue(_:))
+explains why DisplayImmediately ignores media cadence. The preview maps media
+PTS to host-clock deadlines using the behavior described by
+[controlTimebase](https://developer.apple.com/documentation/avfoundation/avsamplebufferdisplaylayer/controltimebase),
+and enqueues through the layer's sampleBufferRenderer.
+
 ## Images
 
 The product photograph and application screenshot in the README were supplied by

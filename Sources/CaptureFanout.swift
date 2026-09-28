@@ -98,3 +98,21 @@ final class CaptureTiming {
  }
  var snapshot:[String:Any]{["maxStageMs":maxima,"slowEvents":events]}
 }
+
+#if PREVIEW_DIAGNOSTICS
+/// Timing metadata only; never stores images, audio or encoded media.
+final class PreviewTrace {
+ static let shared=PreviewTrace()
+ private let lock=NSLock(),writer=DispatchQueue(label:"Elgato.PreviewTrace")
+ private var events=[[Double]](),start=ProcessInfo.processInfo.systemUptime
+ func reset(){lock.lock();events.removeAll(keepingCapacity:true);start=ProcessInfo.processInfo.systemUptime;lock.unlock()}
+ func event(_ stage:Double,_ pts:Double = -1,_ value:Double = 0){
+  lock.lock();defer{lock.unlock()}
+  if events.count<50000{events.append([stage,ProcessInfo.processInfo.systemUptime-start,pts,value])}
+ }
+ func save(){
+  lock.lock();let copy=events;lock.unlock()
+  writer.async{if let data=try? JSONSerialization.data(withJSONObject:copy){try? data.write(to:FileManager.default.temporaryDirectory.appendingPathComponent("ElgatoPreviewTrace.json"),options:.atomic)}}
+ }
+}
+#endif

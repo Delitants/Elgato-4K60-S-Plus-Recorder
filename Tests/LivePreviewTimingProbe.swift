@@ -12,7 +12,7 @@ import AVFoundation
   while ProcessInfo.processInfo.systemUptime-begin<22 {
    let now=ProcessInfo.processInfo.systemUptime
    let(s,sample)=engine.snapshot()
-   if let sample {
+   for sample in sample {
     previews+=1
     let offset=now-CMSampleBufferGetPresentationTimeStamp(sample).seconds
     if baseline==nil{baseline=offset}

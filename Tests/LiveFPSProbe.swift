@@ -10,7 +10,7 @@ import Foundation
   let start=Date();var started=false,lastReport=Date.distantPast,frames=0,firstPreview:Date?,lastPreview:Date?,finished=false
   while Date().timeIntervalSince(start)<25 {
    let(s,frame)=engine.snapshot()
-   if frame != nil {frames+=1;if firstPreview==nil{firstPreview=Date()};lastPreview=Date()}
+   if !frame.isEmpty {frames+=frame.count;if firstPreview==nil{firstPreview=Date()};lastPreview=Date()}
    if Date().timeIntervalSince(lastReport)>1{print(s.status,"|",s.format,"|",s.detail);fflush(stdout);lastReport=Date()}
    if !started && Date().timeIntervalSince(start)>4 && s.connected {engine.startRecording(URL(fileURLWithPath:CommandLine.arguments[1]),limit:4);started=true}
    if started && !s.recording && !s.saving && (s.lastFile != nil || s.status.contains("error")) {print("RESULT",s.status,s.detail);finished=s.lastFile != nil && !s.status.contains("error");break}

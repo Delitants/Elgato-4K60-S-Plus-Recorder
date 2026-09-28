@@ -153,6 +153,14 @@ individual segment boundaries. If the recording backend cannot keep up, recordin
 stops with an error instead of silently dropping recording frames. Keep any
 reported partial file; an error does not guarantee the last file was finalized.
 
+### Live preview pacing
+
+Preview frames use media timestamps and a bounded buffer to smooth USB/decode
+arrival jitter. Output FPS still controls preview, recording and NDI. Lowering
+59.94 fps input to 25 fps reduces motion detail and uses uneven source-frame
+selection; it does not synthesize intermediate images. Choose Match incoming
+stream to retain all incoming motion frames.
+
 ### Hardware constant quality
 
 In **Settings → Video**, choose **H.264 / AVC** or **HEVC**, use **Automatic**
@@ -259,4 +267,4 @@ remain visible so the app can explain an incompatible selection.
 
 See [BUILD.md](BUILD.md#output-combination-audit) for the output-matrix runner.
 
-[0.6.0 validation](docs/VALIDATION-0.6.0.md) · [0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
+[0.6.1 validation](docs/VALIDATION-0.6.1.md) · [0.6.0 validation](docs/VALIDATION-0.6.0.md) · [0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
