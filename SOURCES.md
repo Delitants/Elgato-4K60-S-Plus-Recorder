@@ -75,7 +75,7 @@ Exact architecture-specific versions, licenses and notices are in
 in [BUILD.md](BUILD.md), [scripts/dependencies](scripts/dependencies/README.md)
 and [Licenses/dependency-build-recipes](Licenses/dependency-build-recipes).
 
-The [v0.4.1 release](https://github.com/Delitants/ElgatoRecorder-macOS/releases/tag/v0.4.1)
+The [v0.4.1 release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/tag/v0.4.1)
 includes `Elgato-Recorder-0.4.1-Dependency-Sources.tar.gz` and checksums. That archive
 contains corresponding open-source dependency inputs; it does not contain the
 proprietary Windows driver or NDI runtime source. App/helper source is published

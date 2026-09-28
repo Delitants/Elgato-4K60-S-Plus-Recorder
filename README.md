@@ -1,10 +1,10 @@
-# Elgato Recorder for macOS
+# Elgato 4K60 S+ Recorder
 
 A native AppKit recorder for **Elgato Game Capture 4K60 S+ (20GAP9901)** over USB 3.
 Independent community software; not affiliated with Elgato or Corsair. This is
 experimental support for a device that Elgato does not officially support on macOS.
 
-[Download ARM or Intel releases](https://github.com/Delitants/ElgatoRecorder-macOS/releases)
+[Download ARM or Intel releases](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases)
 
 ![Elgato Game Capture 4K60 S+](docs/images/elgato-4k60-s-plus.png)
 
@@ -24,6 +24,18 @@ checksums before approving a downloaded build.
 ARM was tested on an M1 Pro. Intel code and bundled libraries were tested through
 Rosetta on that Mac; a physical Intel Mac has not been tested. Hardware encoders
 and performance depend on the Mac. See [validation and limitations](VALIDATION.md).
+
+## Device compatibility
+
+This application supports the **Elgato Game Capture 4K60 S+** only. Local hardware
+validation used model **20GAP9901**, USB ID **0fd9:0075**. The USB implementation
+also accepts **0fd9:0068**, based on the upstream community driver, but that ID
+has not been tested locally.
+
+Other Elgato models are not supported. The app uses the 4K60 S+ proprietary USB
+control and stream protocol rather than a generic camera capture interface.
+Models such as HD60 S/S+, HD60 X, 4K X and 4K60 Pro require separate integration
+and validation; sharing the Elgato brand does not establish compatibility.
 
 ## Capture
 
