@@ -4,7 +4,7 @@ Native macOS ARM and Intel builds. Requires macOS 26+; NDI runtime is bundled.
 
 ![Elgato Game Capture 4K60 S+](https://raw.githubusercontent.com/Delitants/Elgato-4K60-S-Plus-Recorder/main/docs/images/elgato-4k60-s-plus.png)
 
-![Elgato Recorder on macOS with a completed recording](https://raw.githubusercontent.com/Delitants/Elgato-4K60-S-Plus-Recorder/main/docs/images/elgato-recorder.png)
+![Elgato Recorder on macOS with live video and HDMI audio preview](https://raw.githubusercontent.com/Delitants/Elgato-4K60-S-Plus-Recorder/main/docs/images/elgato-recorder.png)
 
 - Fixed false recording overloads caused by interleaved audio/video timestamps.
   Queue age now measures monotonic waiting time, with a bounded two-second

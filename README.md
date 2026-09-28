@@ -8,7 +8,7 @@ experimental support for a device that Elgato does not officially support on mac
 
 ![Elgato Game Capture 4K60 S+](docs/images/elgato-4k60-s-plus.png)
 
-![Elgato Recorder on macOS with a completed recording](docs/images/elgato-recorder.png)
+![Elgato Recorder on macOS with live video and HDMI audio preview](docs/images/elgato-recorder.png)
 
 ## Install
 
