@@ -79,3 +79,16 @@ packaging. Version 0.3.0 unintentionally contained FFmpeg dylibs declaring 27.0
 despite the app's 26.0 minimum; use 0.4.0 on macOS 26. Actual runtime testing was
 on macOS 27. `test-fps.sh` checks integer/fractional rates, no upsampling,
 audio continuity, original-stream rejection, and unaligned-keyframe splitting.
+
+### Output combination audit
+
+`./test-output-matrix.sh '/path/Elgato Recorder.app' /path/to/reports`
+compiles the production `RecordingSink` into a temporary copy of the app, replays
+synthetic interleaved audio/video, decodes each output, and removes generated media.
+The modes are `all` (1080p H.264 input), `hevc` (10-bit HEVC input), `controls`
+(encoder/audio controls), `hardware` (hardware rate/profile combinations and bitrate boundaries),
+`4k` (4K input and output scaling), and `hdr` (PQ passthrough and transcode rejection). An optional list
+of modes follows the report directory. Each failed case is retained in JSONL and
+makes the runner exit nonzero. Hardware tests require normal VideoToolbox access;
+a sandbox denial is not a device capability result. These short fixtures check
+compatibility, not extended real-time throughput.

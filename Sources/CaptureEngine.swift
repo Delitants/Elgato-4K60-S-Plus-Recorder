@@ -51,7 +51,8 @@ final class CaptureEngine {
 
         recorder.finish{url,error in
             self.change{ s in
-                s.saving=false
+                // Finalization drains the recording queue; sample the final duration now.
+                s.seconds=recorder.duration;s.saving=false
                 let result=RecordingCompletion(url:url,error:error)
                 if let url=result.url{s.lastFile=url};s.status=result.status;s.detail=result.detail
             }

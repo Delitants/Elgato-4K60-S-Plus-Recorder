@@ -1,6 +1,10 @@
 import Foundation
 import CoreMedia
 import Darwin
+struct BackendWriteError:LocalizedError {
+ let diagnostic:String
+ var errorDescription:String? {diagnostic.isEmpty ? "Recording backend stopped accepting media. The encoder may be stalled or too slow for these settings." : "Recording backend failed: " + diagnostic}
+}
 final class MediaHelperClient {
  private let process=Process(),input=Pipe(),output=Pipe(),errors=Pipe(),lock=NSLock()
  private var stdout: ProcessOutput?, stderr: ProcessOutput?
@@ -10,14 +14,14 @@ final class MediaHelperClient {
  private func message(_ type:UInt32,_ pts:Int64,_ data:Data=Data())throws{
   var packet=Data();for var n in [UInt32(0x454c4700)|type,UInt32(data.count)]{n=n.littleEndian;withUnsafeBytes(of:&n){packet.append(contentsOf:$0)}}
   var time=pts.littleEndian;withUnsafeBytes(of:&time){packet.append(contentsOf:$0)};packet.append(data)
-  let fd=input.fileHandleForWriting.fileDescriptor;let deadline=ProcessInfo.processInfo.systemUptime+0.5
+  let fd=input.fileHandleForWriting.fileDescriptor;let deadline=ProcessInfo.processInfo.systemUptime+2.0
   try packet.withUnsafeBytes{raw in var offset=0
    while offset<raw.count {
     let n=Darwin.write(fd,raw.baseAddress!.advanced(by:offset),raw.count-offset)
     if n>0 {offset+=n;continue}
     if errno==EINTR{continue}
     if errno==EAGAIN && ProcessInfo.processInfo.systemUptime<deadline{var p=pollfd(fd:fd,events:Int16(POLLOUT),revents:0);_ = poll(&p,1,10);continue}
-    throw RecorderError(message:"Recording backend cannot keep up or exited. \(diagnostic)")
+    throw BackendWriteError(diagnostic:diagnostic)
    }
   }
  }
@@ -59,7 +63,7 @@ final class MediaHelperClient {
   if process.isRunning{ProcessLifecycle.stop(process);throw RecorderError(message:"Recording backend timed out while finalizing")}
   // The process can exit before its final output callback. Require both EOFs.
   guard stdout?.waitForEOF()==true,stderr?.waitForEOF()==true else{throw RecorderError(message:"Recording backend output did not finish draining")}
-  if let error{throw error};guard process.terminationStatus==0 else{throw RecorderError(message:diagnostic)}
+  guard process.terminationStatus==0 else{throw RecorderError(message:diagnostic.isEmpty ? "Recording backend exited with status \(process.terminationStatus).":diagnostic)};if let error{throw error}
   guard let saved=lastSavedURL else{throw RecorderError(message:"Recording backend did not confirm a finalized file")}
   return saved
  }

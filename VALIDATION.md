@@ -178,3 +178,11 @@ harness, including preview delivery, recording, and NDI. macOS 26 runtime and
 physical Intel hardware testing remain unverified; host runtime was macOS 27.
 The final live MKV reports 30/1 fps, 118 H.264 frames, 48 kHz stereo Opus,
 and 3.962 seconds. Full strict decode passed with no errors; the file was deleted.
+
+## Version 0.4.1 — recording startup and output audit
+
+See [OUTPUT-TEST-REPORT.md](OUTPUT-TEST-REPORT.md) for the 949-case audit, the
+recording failures reproduced and corrected, native UI/live-recording checks,
+and explicit test boundaries. Raw per-configuration results are stored alongside
+that report. Hardware H.264 B-frames are intentionally blocked with a warning;
+hardware HEVC B-frames and software H.264/HEVC B-frames passed their tests.

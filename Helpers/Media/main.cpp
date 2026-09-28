@@ -133,7 +133,7 @@ class Recorder {
  }
  void receiveFrames(){AVFrame*f=av_frame_alloc();int r;while((r=avcodec_receive_frame(dec,f))>=0){auto it=pending.find(f->pts);if(it==pending.end())throw runtime_error("Decoded timestamp has no source packet");videoFrame(f,f->pts,(f->flags&AV_FRAME_FLAG_KEY)!=0,it->second);av_packet_free(&it->second);pending.erase(it);av_frame_unref(f);}av_frame_free(&f);if(r!=AVERROR(EAGAIN)&&r!=AVERROR_EOF)ck(r,"Read decoded frame");}
 public:
- Recorder():copy(opt("video")=="copy"){}
+ Recorder():copy(opt("video")=="copy"){if(opt("video")=="h264_videotoolbox" && num("bframes")>0)throw runtime_error("Hardware H.264 B-frames are unavailable: disable B-frames or choose software encoding");}
  ~Recorder(){for(auto &entry:pending)av_packet_free(&entry.second);if(out){if(out->pb)avio_closep(&out->pb);avformat_free_context(out);}avcodec_free_context(&ve);avcodec_free_context(&ae);avcodec_free_context(&dec);av_buffer_unref(&hw);sws_freeContext(scaler);swr_free(&resampler);if(fifo)av_audio_fifo_free(fifo);}
  void setup(vector<uint8_t>e){if(dec||e.empty())throw runtime_error("Invalid or repeated setup");extra=move(e);auto c=avcodec_find_decoder(num("hevc")?AV_CODEC_ID_HEVC:AV_CODEC_ID_H264);dec=avcodec_alloc_context3(c);dec->pkt_timebase=US;dec->extradata=(uint8_t*)av_mallocz(extra.size()+AV_INPUT_BUFFER_PADDING_SIZE);memcpy(dec->extradata,extra.data(),extra.size());dec->extradata_size=int(extra.size());dec->thread_count=1;dec->flags|=AV_CODEC_FLAG_LOW_DELAY;
   if(num("decoder")!=2){int r=av_hwdevice_ctx_create(&hw,AV_HWDEVICE_TYPE_VIDEOTOOLBOX,nullptr,nullptr,0);if(r>=0){dec->hw_device_ctx=av_buffer_ref(hw);dec->get_format=hardwareFormat;}else if(num("decoder")==1)ck(r,"Required hardware decoder");}

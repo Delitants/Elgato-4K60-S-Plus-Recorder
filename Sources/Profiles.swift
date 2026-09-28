@@ -25,8 +25,15 @@ struct RecordingProfile:Codable {
     var splitMode=0, splitSeconds=600, splitMB=1024
     var ndiEnabled=false, ndiName="Elgato Recorder", ndiScale=1
     var fileExtension:String { ["mov","mp4","mkv","ts"][min(3,max(0,container))] }
-    var usesHelper:Bool {sourceFPS != .source || outputFPS != .source || container>=2 || codec==4 || audio>=3 || rateControl != .abr || keyframeSeconds != 0 || bFrames != 0 || videoProfile != "auto" || preset != "auto" || spatialAQ != .auto || (scale != 0 && scalingFilter != .bicubic) || splitMode != 0}
+    var usesHelper:Bool {(encoder==2 && transcodes) || sourceFPS != .source || outputFPS != .source || container>=2 || codec==4 || audio>=3 || rateControl != .abr || keyframeSeconds != 0 || bFrames != 0 || videoProfile != "auto" || preset != "auto" || spatialAQ != .auto || (scale != 0 && scalingFilter != .bicubic) || splitMode != 0}
 
+    var recordingWarning:String? {
+        if codec==1 && encoder != 2 && bFrames>0 {
+            return "Hardware H.264/AVC B-frames are unavailable in this version because the hardware encoder can return invalid timestamps. Disable B-frames or choose Software encoding."
+        }
+        return nil
+    }
+    func validateRecording() throws {try validate();if let warning=recordingWarning{throw RecorderError(message:warning)}}
     var transcodes:Bool { codec != 0 }
     func validate() throws {
         func require(_ ok:Bool,_ message:String)throws{if !ok{throw RecorderError(message:message)}}

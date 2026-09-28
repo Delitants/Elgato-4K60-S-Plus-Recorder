@@ -8,7 +8,7 @@ experimental support for a device that Elgato does not officially support on mac
 
 ![Native recording settings](docs/images/recording-settings.png)
 
-The screenshot shows the 0.3 settings layout; 0.4 adds the FPS controls described below.
+The screenshot shows the 0.3 settings layout; 0.4 adds FPS controls and 0.4.1 uses crisper segmented navigation.
 
 ## Install
 
@@ -167,3 +167,20 @@ and [Elgato's public device-support examples](https://github.com/elgatosf/captur
 Live release testing found that AV1 1080p60 with 4K input and NDI could not keep up
 on the loaded M1 Pro. The app reports overload and retains the partial file.
 See [validation results](VALIDATION.md) for the tested matrix and limitations.
+
+### Recording startup and B-frames (0.4.1)
+
+Recording queue age uses monotonic waiting time, so interleaved HDMI audio/video
+timestamps cannot trigger a false overload. Cold encoder startup has a bounded
+two-second allowance; a recorder that falls behind still stops rather than losing frames.
+Explicit Software encoding uses the bundled x264/x265 encoder consistently across
+containers. H.264 is also labeled AVC.
+
+Hardware H.264 B-frames are blocked with a warning before recording because the
+VideoToolbox encoder can return invalid decode timestamps. Use hardware encoding
+with B-frames Disabled, or select Software for B-frames. Existing saved settings
+remain visible so the app can explain an incompatible selection.
+
+See [BUILD.md](BUILD.md#output-combination-audit) for the output-matrix runner.
+
+[0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)

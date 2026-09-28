@@ -1,18 +1,22 @@
-# Elgato Recorder 0.4.0 (experimental)
+# Elgato Recorder 0.4.1 (experimental)
 
-Separate macOS ARM and Intel builds with bundled NDI runtime. Requires macOS 26+.
+Native macOS ARM and Intel builds. Requires macOS 26+; NDI runtime is bundled.
 
-- Measured incoming FPS replaces hard-coded 59.94/60 timing.
-- Output FPS cap applies to preview, recording and NDI: 15, 23.976, 24, 25,
-  29.97, 30, 50, 59.94 or 60. No upsampling or interpolation.
-- Source FPS override for devices that repeat a lower-rate source in a higher-rate
-  encoded stream. Physical HDMI rate detection remains unverified.
-- Decoded-frame downsampling preserves audio and playback duration. Original
-  compressed recording reports an error if FPS reduction requires transcoding.
-- Correct NDI rate metadata, startup counters, and splits when source keyframes
-  fall on discarded output frames. Device timestamp jitter is covered by regressions.
-- Corrected FFmpeg library minimum OS to macOS 26; 0.3.0 had libraries declaring 27.
+- Fixed false recording overloads caused by interleaved audio/video timestamps.
+  Queue age now measures monotonic waiting time, with a bounded two-second
+  cold-start allowance and the existing 64 MB memory limit.
+- Replaced blurred legacy settings tabs with native segmented navigation.
+- Explicit Software encoding consistently uses the bundled x264/x265 encoder
+  across containers, fixing software HEVC recording failures in MOV/MP4.
+- Hardware H.264/AVC B-frames now show a warning and are rejected before recording.
+  On the tested Mac they produce invalid decode timestamps. Select Disabled or
+  use Software encoding. Hardware HEVC B-frames remain available.
+- Final elapsed time updates after queued recording data finishes writing.
+- Backend failures retain the actual encoder diagnostic after output drains.
+- Added a production-pipeline output matrix with frame-count, decode, lossless
+  audio, profile and scaling checks. See VALIDATION.md for results and limits.
 
-See README.md for controls and VALIDATION.md for tested limits. Intel testing uses
-Rosetta, not physical Intel hardware. Builds are ad-hoc signed, not notarized.
-Software AV1 performance and physical HDR validation limitations remain.
+Intel tests use Rosetta, not physical Intel hardware. Builds are ad-hoc signed,
+not notarized. Short matrix fixtures establish compatibility, not sustained
+performance at every resolution, frame rate, bitrate and compression preset.
+Physical HDR display validation remains unverified.

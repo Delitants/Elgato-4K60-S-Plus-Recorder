@@ -13,10 +13,11 @@ final class RecordingSink {
  private let profile:RecordingProfile
  init(url:URL,profile:RecordingProfile,initialRate:VideoRate?=nil){self.url=url;self.profile=profile;converter=MediaConverter(hevc:profile.captureHEVC,initialRate:initialRate);decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC
   native=profile.usesHelper ? nil:MovieRecorder(url:url,profile:profile);helper=profile.usesHelper ? MediaHelperClient(url:url,profile:profile):nil
+  do{try profile.validateRecording()}catch{failure=error}
  }
  func offer(_ frame:DeviceFrame)->Bool{
   lock.lock();defer{lock.unlock()};guard !ended,failure==nil else{return false}
-  guard budget.reserve(bytes:frame.data.count,timestamp:frame.timestamp) else{failure=RecorderError(message:"Recording cannot keep up. Lower encoder effort or output resolution.");return false}
+  guard budget.reserve(bytes:frame.data.count) else{failure=RecorderError(message:"Recording cannot keep up. Lower encoder effort or output resolution.");return false}
   queue.async{defer{self.budget.release(bytes:frame.data.count)}
    do {
     guard self.error==nil,let(sample,key)=try self.converter.convert(frame) else{return}
@@ -37,7 +38,7 @@ final class RecordingSink {
   lock.lock();guard !ended else{lock.unlock();return};ended=true;lock.unlock()
   queue.async{
    self.decoder.close()
-   if let helper=self.helper{do{let url=try helper.finish();completion(url,self.error?.localizedDescription)}catch{completion(helper.lastSavedURL,self.error?.localizedDescription ?? error.localizedDescription)}}
+   if let helper=self.helper{do{let url=try helper.finish();completion(url,self.error?.localizedDescription)}catch{completion(helper.lastSavedURL,self.error is BackendWriteError ? error.localizedDescription : (self.error?.localizedDescription ?? error.localizedDescription))}}
    else if let native=self.native{native.finish{url,error in completion(url,self.error?.localizedDescription ?? error)}}
   }
  }

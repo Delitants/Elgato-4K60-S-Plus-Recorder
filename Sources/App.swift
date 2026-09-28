@@ -138,6 +138,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate {
         refresh()
         if current.recording{engine.stopRecording();return}
         do{
+            try profile.validateRecording()
             var limit:Double=0
             if durationToggle.state == .on {
                 let parts=durationField.stringValue.split(separator:":",omittingEmptySubsequences:false)

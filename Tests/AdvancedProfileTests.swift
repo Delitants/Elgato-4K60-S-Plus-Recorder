@@ -10,6 +10,12 @@ import Foundation
   q.videoProfile="baseline";q.bFrames=2;invalid(q)
   q.bFrames=0;q.videoProfile="auto";q.codec=0;q.scale=1;invalid(q)
   do {_ = try JSONDecoder().decode(RecordingProfile.self,from:Data("{\"rateControl\":\"bogus\"}".utf8));fatalError("unknown enum accepted")}catch{}
+  var hardware=RecordingProfile();hardware.codec=1;hardware.encoder=1;hardware.bFrames=1
+  do{try hardware.validateRecording();fatalError("Hardware H.264 B-frames must be rejected before writing a file")}catch{assert(error.localizedDescription.contains("B-frames"))}
+  hardware.encoder=2;try hardware.validateRecording()
+  hardware.encoder=1;hardware.bFrames=0;try hardware.validateRecording()
+  var software=RecordingProfile();software.codec=2;software.encoder=2
+  assert(software.usesHelper,"Explicit software HEVC must use the bundled software encoder across containers")
   print("PASS advanced migration and compatibility")
  }
 }
