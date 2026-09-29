@@ -1,6 +1,8 @@
 # Validation
 
-Current release: [0.6.7 recording-rate recovery and film preview](docs/VALIDATION-0.6.7.md).
+Current release: [0.6.8 window-close crash fix](docs/VALIDATION-0.6.8.md).
+
+Previous: [0.6.7 recording-rate recovery and film preview](docs/VALIDATION-0.6.7.md).
 
 Previous: [0.6.5 audio clock recovery validation](docs/VALIDATION-0.6.5.md).
 

@@ -67,6 +67,8 @@ variables at a built app:
 
 ```sh
 bash test.sh
+# Included in test.sh; also runnable separately (requires libusb):
+bash test-window-lifecycle.sh
 bash test-hdr.sh
 bash test-fps.sh
 bash test-rate-recovery.sh "/path/to/Elgato Recorder.app"

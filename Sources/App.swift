@@ -101,6 +101,7 @@ final class StereoMeterView:NSView {
 final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFieldDelegate {
     let engine=CaptureEngine()
     var window:NSWindow!,timer:Timer?
+    private var uiClosing=false,terminationRequested=false
     let preview=PreviewView(frame:.zero)
     let status=NSTextField(labelWithString:"Connecting…")
     let detail=NSTextField(wrappingLabelWithString:"Opening your Elgato 4K60 S+.")
@@ -134,6 +135,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         if let data=UserDefaults.standard.data(forKey:"recordingProfile"),let saved=try? JSONDecoder().decode(RecordingProfile.self,from:data),(try? saved.validate()) != nil {profile=saved;engine.setProfile(saved)}
         setupMenu()
         window=NSWindow(contentRect:NSRect(x:0,y:0,width:1100,height:860),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
+        // Swift owns this window. AppKit's legacy close-time release would leave
+        // our strong reference dangling while deferred termination drains media.
+        window.isReleasedWhenClosed=false
         window.title="Elgato Recorder";window.subtitle="4K60 S+ · USB capture";window.minSize=NSSize(width:720,height:700);window.delegate=self
         let root=NSView();window.contentView=root
         let title=NSTextField(labelWithString:"Elgato Recorder");title.font = .systemFont(ofSize:23,weight:.semibold)
@@ -207,6 +211,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
     var lastPreviewTrace=0.0
     #endif
     func refresh(){
+        guard !uiClosing else{return}
         #if PREVIEW_DIAGNOSTICS
         PreviewTrace.shared.event(4)
         PreviewTrace.shared.event(10,window.isMiniaturized ? 1:0,window.occlusionState.contains(.visible) && !NSApp.isHidden ? 1:0)
@@ -254,17 +259,27 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
     }
     @objc func showSettings(){
         settingsController=RecordingSettings(profile:profile,usbSpeed:current.usbSpeed){ [weak self] value in
-            guard let self else{return};self.profile=value
+            guard let self,!self.uiClosing else{return};self.profile=value
             if let data=try? JSONEncoder().encode(value){UserDefaults.standard.set(data,forKey:"recordingProfile")}
             self.engine.disconnect {DispatchQueue.main.async{
+                guard !self.uiClosing else{return}
                 self.engine.setProfile(value);self.preview.clear();self.engine.connect()
             }}
         }
         window.beginSheet(settingsController!.window)
     }
     private func updatePreviewVisibility(){
-        guard let window else{return}
+        guard !uiClosing,let window else{return}
         preview.setPresentationActive(videoToggle.state == .on && window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible) && !NSApp.isHidden)
+    }
+    private func stopUIRefresh(){
+        guard !uiClosing else{return}
+        uiClosing=true;timer?.invalidate();timer=nil
+        preview.setPresentationActive(false)
+    }
+    func windowWillClose(_ notification:Notification){
+        guard let closed=notification.object as? NSWindow,closed === window else{return}
+        stopUIRefresh()
     }
     func windowDidMiniaturize(_ notification:Notification){updatePreviewVisibility()}
     func windowDidDeminiaturize(_ notification:Notification){updatePreviewVisibility()}
@@ -316,8 +331,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
     @objc func showFile(){if let url=current.lastFile{NSWorkspace.shared.activateFileViewerSelecting([url])}}
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply{
+        stopUIRefresh()
+        guard !terminationRequested else{return .terminateLater}
+        terminationRequested=true
         engine.disconnect{DispatchQueue.main.async{sender.reply(toApplicationShouldTerminate:true)}};return .terminateLater
     }
+    func applicationWillTerminate(_ notification:Notification){stopUIRefresh()}
 }
 @main struct ElgatoRecorderApp {
     static func main(){let app=NSApplication.shared;let delegate=AppDelegate();app.setActivationPolicy(.regular);app.delegate=delegate;app.run();withExtendedLifetime(delegate){}}

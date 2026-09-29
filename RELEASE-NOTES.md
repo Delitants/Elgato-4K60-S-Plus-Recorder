@@ -1,28 +1,17 @@
-# Elgato 4K60 S+ Recorder 0.6.7
+# Elgato 4K60 S+ Recorder 0.6.8
 
-Recording no longer aborts when the rolling incoming-FPS estimate varies. It
-shows a warning and continues using source timestamps and the existing encoder
-configuration. True carrier-rate changes fall back from film cadence recovery
-to timestamp-based FPS conversion, preserving the output cap.
+Fixes a crash when closing the main window. The window stays owned until shutdown
+completes, UI refresh stops immediately, and queued callbacks cannot access the
+closed UI. Closing the window or choosing Quit still waits for an active recording
+to finish writing before the app exits.
 
-Preview and NDI now recover the original pictures when the manual 23.976/24 fps
-film setting is used with a repeated 59.94/60 fps stream. This fixes phase-dependent
-repeated/skipped pictures caused by timestamp-only sampling. Interrupted carrier
-timing uses ordinary selection until the film cadence can be reacquired.
-
-Cold helper startup now has bounded grace, avoiding a premature pipe/queue timeout
-while the helper loads. Normal recording limits and the memory cap remain in place.
-
-Includes the audio clock, background recording and preview-resume fixes from
-previous versions. Real codec/resolution/HDR changes and unrecoverable I/O/encoder
-failures can still stop a recording.
+Includes the recording-rate recovery and film-preview fixes from 0.6.7.
 
 ## Choose your Mac download
 
 - **macOS-Apple-Silicon.zip** — Macs with Apple M-series chips (arm64).
 - **macOS-Intel.zip** — Intel-based Macs (x86_64).
 
-Both downloads require **macOS 26 or later** and are ad-hoc signed, not notarized.
-They are for macOS only, not Windows PCs.
+Requires **macOS 26 or later**. Ad-hoc signed, not notarized. macOS only.
 
-[Validation details](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.7.md).
+[Validation details](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.8.md).
