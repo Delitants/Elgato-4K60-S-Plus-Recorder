@@ -137,8 +137,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         window.title="Elgato Recorder";window.subtitle="4K60 S+ · USB capture";window.minSize=NSSize(width:720,height:700);window.delegate=self
         let root=NSView();window.contentView=root
         let title=NSTextField(labelWithString:"Elgato Recorder");title.font = .systemFont(ofSize:23,weight:.semibold)
+        let version=Bundle.main.object(forInfoDictionaryKey:"CFBundleShortVersionString") as? String ?? "Unknown"
+        let build=Bundle.main.object(forInfoDictionaryKey:"CFBundleVersion") as? String ?? "Unknown"
+        let versionLabel=NSTextField(labelWithString:"v\(version) (build \(build))")
+        versionLabel.font = .systemFont(ofSize:11,weight:.medium);versionLabel.textColor = .secondaryLabelColor
+        versionLabel.setAccessibilityLabel("Version \(version), build \(build)")
+        let titleRow=NSStackView(views:[title,versionLabel]);titleRow.orientation = .horizontal;titleRow.alignment = .firstBaseline;titleRow.spacing=10
         let device=NSTextField(labelWithString:"GAME CAPTURE 4K60 S+");device.font = .systemFont(ofSize:11,weight:.medium);device.textColor = .secondaryLabelColor
-        let identity=NSStackView(views:[device,title]);identity.orientation = .vertical;identity.alignment = .leading;identity.spacing=4
+        let identity=NSStackView(views:[device,titleRow]);identity.orientation = .vertical;identity.alignment = .leading;identity.spacing=4
         status.font = .systemFont(ofSize:14,weight:.medium)
         let icon=NSImageView();icon.image=Bundle.main.url(forResource:"Recorder",withExtension:"icns").flatMap{NSImage(contentsOf:$0)} ?? NSApp.applicationIconImage
         icon.imageScaling = .scaleProportionallyUpOrDown;icon.widthAnchor.constraint(equalToConstant:52).isActive=true;icon.heightAnchor.constraint(equalToConstant:52).isActive=true
