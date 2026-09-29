@@ -12,7 +12,8 @@ Independent community software, not affiliated with Elgato or Corsair.
 
 ## Install and record
 
-1. Download **arm64** for Apple Silicon or **x86_64** for Intel, unzip it, and
+1. Download **macOS-Apple-Silicon** for M-series Macs or **macOS-Intel** for
+   Intel Macs, unzip it, and
    move **Elgato Recorder.app** to Applications.
 2. Connect the device's power supply, its **PC/data USB port** to a USB 3 port,
    and your source to **HDMI IN**. Set source audio to **stereo PCM**.
