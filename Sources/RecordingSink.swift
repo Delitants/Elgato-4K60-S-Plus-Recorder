@@ -4,6 +4,7 @@ final class RecordingSink {
  private let queue=DispatchQueue(label:"Elgato.Recording",qos:.userInitiated),lock=NSLock(),budget=QueueBudget()
  private let converter:MediaConverter,decoder=PreviewDecoder(),native:MovieRecorder?,helper:MediaHelperClient?
  private var recordingRate:VideoRate?
+ private var recordingActivity:NSObjectProtocol?
  private var failure:Error?,ended=false,frames=0,elapsed=0.0,origin:UInt64?
  private var acceptedAt:Double?,fileSize:Int64=0,refreshPending=false
  private lazy var fileBytes=RecordingFileBytes(url:url,split:profile.splitMode != 0)
@@ -17,9 +18,20 @@ final class RecordingSink {
  private let profile:RecordingProfile
  init(url:URL,profile:RecordingProfile,initialRate:VideoRate?=nil){self.url=url;self.profile=profile;converter=MediaConverter(hevc:profile.captureHEVC,initialRate:initialRate);decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC
   native=profile.usesHelper ? nil:MovieRecorder(url:url,profile:profile);helper=profile.usesHelper ? MediaHelperClient(url:url,profile:profile):nil
-  do{try profile.validateRecording()}catch{failure=error}
+  do{
+   try profile.validateRecording()
+   // Capture must remain active while hidden. Keep App Nap and idle system sleep
+   // disabled until all queued media and the container trailer are finalized.
+   // Display sleep is deliberately allowed.
+   recordingActivity=ProcessInfo.processInfo.beginActivity(options:.userInitiated,reason:"Recording HDMI video and audio")
+  }catch{failure=error}
   queue.async{_ = self.fileBytes}
  }
+ private func endRecordingActivity(){
+  lock.lock();let activity=recordingActivity;recordingActivity=nil;lock.unlock()
+  if let activity{ProcessInfo.processInfo.endActivity(activity)}
+ }
+ deinit{endRecordingActivity()}
  // The capture worker requests a refresh but never performs filesystem I/O.
  func refreshWrittenBytes(){
   lock.lock();guard !refreshPending,!ended else{lock.unlock();return};refreshPending=true;lock.unlock()
@@ -55,9 +67,9 @@ final class RecordingSink {
    if let helper=self.helper{
     let result:(URL?,String?)
     do{let url=try helper.finish();result=(url,self.error?.localizedDescription)}catch{result=(helper.lastSavedURL,self.error is BackendWriteError ? error.localizedDescription : (self.error?.localizedDescription ?? error.localizedDescription))}
-    self.updateWrittenBytes();completion(result.0,result.1)
+    self.updateWrittenBytes();self.endRecordingActivity();completion(result.0,result.1)
    }
-   else if let native=self.native{native.finish{url,error in self.queue.async{self.updateWrittenBytes();completion(url,self.error?.localizedDescription ?? error)}}}
+   else if let native=self.native{native.finish{url,error in self.queue.async{self.updateWrittenBytes();self.endRecordingActivity();completion(url,self.error?.localizedDescription ?? error)}}}
   }
  }
 }

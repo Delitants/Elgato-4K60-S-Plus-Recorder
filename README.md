@@ -89,6 +89,11 @@ lost in the source or HDMI signal. Codec/bit-depth text is taken from the receiv
 format description (bit depth is omitted if unavailable). Preview requests 10-bit
 pixel buffers for HEVC; the final display path and source precision are separate.
 
+While recording, the app prevents App Nap and idle system sleep, including when
+its window is minimized or hidden. Display sleep remains allowed. This activity
+ends after the recording is finalized; it does not change macOS power settings
+or prevent an explicit sleep/shutdown command.
+
 ## Frame rate and downsampling
 
 **Settings → Video → Output FPS** applies to video preview, recording, and NDI.
@@ -283,4 +288,4 @@ remain visible so the app can explain an incompatible selection.
 
 See [BUILD.md](BUILD.md#output-combination-audit) for the output-matrix runner.
 
-[0.6.2 validation](docs/VALIDATION-0.6.2.md) · [0.6.1 validation](docs/VALIDATION-0.6.1.md) · [0.6.0 validation](docs/VALIDATION-0.6.0.md) · [0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
+[0.6.3 validation](docs/VALIDATION-0.6.3.md) · [0.6.2 validation](docs/VALIDATION-0.6.2.md) · [0.6.1 validation](docs/VALIDATION-0.6.1.md) · [0.6.0 validation](docs/VALIDATION-0.6.0.md) · [0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
