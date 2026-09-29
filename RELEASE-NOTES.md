@@ -1,23 +1,21 @@
-# Elgato 4K60 S+ Recorder 0.6.4
+# Elgato 4K60 S+ Recorder 0.6.5
 
-Fixes stale, jerky preview playback when restoring a minimized or hidden window.
-Video presentation now stops and flushes while the window is not visible, then
-resumes from the newest decoded frame. A stalled UI timer also discards its
-stale preview batch. Recording and audio monitoring remain independent.
+Recoverable audio timing errors now warn and continue recording. The previous
+helper aborted when audio sample counts drifted 100 ms from device timestamps;
+on the tested device, ordinary clock skew reached that limit after about 29 minutes.
 
-Active USB capture now prevents App Nap even when not recording, avoiding a
-transport backlog that would burst through after restoring the window. Idle
-system sleep remains allowed outside recording; disconnecting releases this
-activity.
+Small differences are corrected gradually with audio resampling. Missing audio
+is filled with silence, overlapping/stale audio is trimmed or discarded, and
+large forward gaps resume at the next audio timestamp without allocating an
+unbounded silence buffer. Video recording continues. An orange warning remains
+visible during and after the recording.
 
-The HDMI audio status no longer flickers when a USB polling interval contains
-no new PCM packet. Actual silent PCM still updates the stereo meter promptly;
-the signal label holds recent audible activity for 750 ms before showing silence.
+Unrecoverable errors still attempt to drain the encoders and finalize a playable
+partial file. Disk or encoder failures cannot be guaranteed recoverable. Failed
+initialization and failed trailer writes are guarded against unsafe retry.
 
-Includes the 0.6.3 App Nap protection during recording and finalization. Encoder,
-file format, recording cadence and queue limits are unchanged.
+The App Nap and preview restoration fixes from 0.6.3/0.6.4 remain included.
+Separate Apple Silicon and Intel apps require macOS 26 or later; both builds are
+ad-hoc signed, not notarized.
 
-Separate Apple Silicon and Intel builds require macOS 26 or later. Hardware CQ
-remains Apple Silicon only. Both apps are ad-hoc signed, not notarized.
-
-See [validation details](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.4.md).
+See [validation details](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.5.md).

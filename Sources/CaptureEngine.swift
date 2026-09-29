@@ -12,6 +12,7 @@ struct CaptureState {
     var incomingVideoMbps:Double?,requestedVideoMbps:Int?
     var remaining:Double?
     var monitoringError:String?
+    var recordingWarning:String?
     var ndiStatus:String?
     var lastFile:URL?
 }
@@ -51,7 +52,7 @@ final class CaptureEngine {
     func startRecording(_ url:URL,limit:Double=0){
         lock.lock();defer{lock.unlock()}
         guard running,state.connected,!state.recording,!state.saving,requestedURL==nil else{return}
-        requestedURL=url;requestedLimit=limit;state.recording=true
+        requestedURL=url;requestedLimit=limit;state.recordingWarning=nil;state.recording=true
     }
     func stopRecording(){lock.lock();stopRequested=true;lock.unlock()}
     func setRecordingLimit(_ seconds:Double){lock.lock();requestedLimit=seconds.isFinite ? max(0,seconds):0;lock.unlock()}
@@ -61,7 +62,7 @@ final class CaptureEngine {
         recorder.finish{url,error in
             self.change{ s in
                 // Finalization drains the recording queue; sample the final duration now.
-                s.seconds=recorder.duration;s.writtenBytes=recorder.writtenBytes;s.saving=false
+                s.seconds=recorder.duration;s.writtenBytes=recorder.writtenBytes;s.recordingWarning=recorder.warning ?? s.recordingWarning;s.saving=false
                 let result=RecordingCompletion(url:url,error:error)
                 if let url=result.url{s.lastFile=url};s.status=result.status;s.detail=result.detail
             }
@@ -191,7 +192,7 @@ final class CaptureEngine {
                     if let ndiOutput{s.ndiStatus=ndiOutput.status}
                     s.videoFrames=videoCount;s.audioFrames=audioCount;s.bytes=bytes
                     s.incomingVideoMbps=videoBitrate.mbps(now:ProcessInfo.processInfo.systemUptime)
-                    if let recorder{s.writtenBytes=recorder.writtenBytes}
+                    if let recorder{s.writtenBytes=recorder.writtenBytes;s.recordingWarning=recorder.warning ?? s.recordingWarning}
                     s.discarded=parser.discarded+(recorder?.dropped ?? 0)
                     s.seconds=recorder?.duration ?? s.seconds
                     s.remaining=deadline.remaining(now:ProcessInfo.processInfo.systemUptime)

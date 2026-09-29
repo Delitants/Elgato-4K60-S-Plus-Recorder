@@ -1,6 +1,8 @@
 # Validation — 2026-09-27
 
-Current update: [0.6.4 preview restore validation](docs/VALIDATION-0.6.4.md).
+Current update: [0.6.5 audio clock recovery validation](docs/VALIDATION-0.6.5.md).
+
+Previous: [0.6.4 preview restore validation](docs/VALIDATION-0.6.4.md).
 
 Previous: [0.6.3 background recording validation](docs/VALIDATION-0.6.3.md).
 

@@ -40,7 +40,8 @@ class Recorder {
  AVRational sourceRate={0,1},outputRate={0,1};int64_t selectionOrigin=AV_NOPTS_VALUE,lastSlot=-1;
  FilmCadence filmCadence;FilmTimeline filmTimeline;std::vector<AVFrame*> filmFrames;std::array<double,5> filmDifferences{NAN,NAN,NAN,NAN,NAN};
  std::vector<uint8_t> filmPrevious;int64_t filmOrigin=AV_NOPTS_VALUE,filmLastPTS=AV_NOPTS_VALUE;
- bool filmKey=false;
+ bool filmKey=false,trailerAttempted=false;
+ int recoveryCount=0;bool softClockWarning=false;
  int width=0,height=0; string output; bool copy; int64_t segmentStart=0,segmentPayloadBytes=0; bool splitPending=false,splitReady=false;
  static AVPixelFormat hardwareFormat(AVCodecContext*c,const AVPixelFormat*fmts){for(auto p=fmts;*p!=AV_PIX_FMT_NONE;++p)if(*p==AV_PIX_FMT_VIDEOTOOLBOX)return *p;return num("decoder")==1?AV_PIX_FMT_NONE:fmts[0];}
  void packet(AVCodecContext*c,AVStream*s){AVPacket*p=av_packet_alloc();while(true){int r=avcodec_receive_packet(c,p);if(r==AVERROR(EAGAIN)||r==AVERROR_EOF)break;ck(r,"Receive encoded packet");av_packet_rescale_ts(p,c->time_base,s->time_base);p->stream_index=s->index;segmentPayloadBytes+=p->size;ck(av_interleaved_write_frame(out,p),"Write packet");}av_packet_free(&p);}
@@ -54,7 +55,7 @@ class Recorder {
   if(copy && av_cmp_q(outputRate,sourceRate)<0)throw runtime_error("FPS downsampling requires a video encoder; Original video cannot drop compressed frames");
  }
  void openOutput(AVFrame*source,int64_t pts){
-  origin=pts;segmentStart=pts;segmentPayloadBytes=0;audioNext=AV_NOPTS_VALUE;
+  origin=pts;segmentStart=pts;segmentPayloadBytes=0;audioNext=AV_NOPTS_VALUE;trailerAttempted=false;
   string path=opt("output");if(num("split")!=0){filesystem::path p(path);char suffix[32];snprintf(suffix,sizeof(suffix),"_part%03d",++part);path=(p.parent_path()/(p.stem().string()+suffix+p.extension().string())).string();}
   if(filesystem::exists(path))throw runtime_error("Output already exists: "+path);
   ck(avformat_alloc_output_context2(&out,nullptr,nullptr,path.c_str()),"Create container");output=path;
@@ -87,20 +88,45 @@ class Recorder {
   ae->bit_rate=num("audioRate",192000);if(ac=="flac"||ac=="libopus")ae->compression_level=num("compression",5);if(out->oformat->flags&AVFMT_GLOBALHEADER)ae->flags|=AV_CODEC_FLAG_GLOBAL_HEADER;
   AVDictionary*ad=nullptr;if(ac=="libopus")av_dict_set(&ad,"vbr",opt("audioMode","on").c_str(),0);ck(avcodec_open2(ae,a,&ad),"Open audio encoder");av_dict_free(&ad);
   as=avformat_new_stream(out,nullptr);as->time_base=ae->time_base;ck(avcodec_parameters_from_context(as->codecpar,ae),"Audio output format");
-  AVChannelLayout input=AV_CHANNEL_LAYOUT_STEREO;ck(swr_alloc_set_opts2(&resampler,&ae->ch_layout,ae->sample_fmt,48000,&input,AV_SAMPLE_FMT_S16,48000,0,nullptr),"Audio converter");ck(swr_init(resampler),"Audio converter init");fifo=av_audio_fifo_alloc(ae->sample_fmt,2,4096);
+  AVChannelLayout input=AV_CHANNEL_LAYOUT_STEREO;ck(swr_alloc_set_opts2(&resampler,&ae->ch_layout,ae->sample_fmt,48000,&input,AV_SAMPLE_FMT_S16,48000,0,nullptr),"Audio converter");ck(av_opt_set_double(resampler,"async",48,0),"Audio clock compensation");ck(av_opt_set_double(resampler,"min_comp",0.001,0),"Audio clock tolerance");ck(av_opt_set_double(resampler,"min_hard_comp",0.1,0),"Audio hard correction");ck(swr_init(resampler),"Audio converter init");fifo=av_audio_fifo_alloc(ae->sample_fmt,2,4096);
   ck(avio_open(&out->pb,path.c_str(),AVIO_FLAG_WRITE),"Open output file");ck(avformat_write_header(out,nullptr),"Write container header");started=true;cout<<"FILE "<<path<<endl;
  }
+ void warning(const string&text){cout<<"WARNING "<<++recoveryCount<<" · "<<text<<endl;}
+ int convertAudio(const uint8_t*data,int n){
+  int capacity=swr_get_out_samples(resampler,n);ck(capacity,"Audio conversion capacity");capacity=max(32,capacity);
+  AVFrame*f=av_frame_alloc();f->format=ae->sample_fmt;f->sample_rate=48000;f->nb_samples=capacity;
+  av_channel_layout_copy(&f->ch_layout,&ae->ch_layout);ck(av_frame_get_buffer(f,0),"PCM conversion buffer");
+  const uint8_t*in[]={data};int converted=swr_convert(resampler,f->data,capacity,data?in:nullptr,n);ck(converted,"Convert PCM");
+  if(converted>0){ck(av_audio_fifo_realloc(fifo,av_audio_fifo_size(fifo)+converted),"Grow audio queue");
+  av_audio_fifo_write(fifo,(void**)f->data,converted);}av_frame_free(&f);audioFrames(false);return converted;
+ }
+ void drainResampler(){if(resampler)while(convertAudio(nullptr,0)>0){}}
  void writeAudio(int64_t pts,const uint8_t*data,int n){
   if(n<=0)return;
   int64_t target=av_rescale_q(pts-origin,US,{1,48000});
   if(audioNext==AV_NOPTS_VALUE)audioNext=target;
-  int64_t expected=audioNext+av_audio_fifo_size(fifo);
-  if(llabs(target-expected)>4800)throw runtime_error("Audio clock discontinuity exceeds 100 ms");
-  AVFrame*f=av_frame_alloc();f->format=ae->sample_fmt;f->sample_rate=48000;f->nb_samples=n;
-  av_channel_layout_copy(&f->ch_layout,&ae->ch_layout);ck(av_frame_get_buffer(f,0),"PCM conversion buffer");
-  const uint8_t*in[]={data};int converted=swr_convert(resampler,f->data,n,in,n);ck(converted,"Convert PCM");
-  ck(av_audio_fifo_realloc(fifo,av_audio_fifo_size(fifo)+converted),"Grow audio queue");
-  av_audio_fifo_write(fifo,(void**)f->data,converted);av_frame_free(&f);audioFrames(false);
+  int64_t expected=audioNext+av_audio_fifo_size(fifo)+swr_get_delay(resampler,48000);
+  int64_t delta=target-expected;
+  // Bound hard correction work. Large forward gaps keep their timestamp gap
+  // rather than allocating/generating arbitrary amounts of silent audio.
+  if(delta>96000){
+   drainResampler();
+   int remainder=av_audio_fifo_size(fifo);
+   if(remainder && ae->frame_size>0){
+    int pad=ae->frame_size-remainder;AVFrame*z=av_frame_alloc();z->format=ae->sample_fmt;z->sample_rate=48000;z->nb_samples=pad;
+    av_channel_layout_copy(&z->ch_layout,&ae->ch_layout);ck(av_frame_get_buffer(z,0),"Gap alignment");
+    av_samples_set_silence(z->data,0,pad,2,ae->sample_fmt);ck(av_audio_fifo_realloc(fifo,remainder+pad),"Gap queue");av_audio_fifo_write(fifo,(void**)z->data,pad);av_frame_free(&z);audioFrames(false);
+   }
+   if(remainder && ae->frame_size==0)audioFrames(true);
+   audioNext=max(audioNext,target);swr_close(resampler);ck(swr_init(resampler),"Reset audio clock");
+   warning("Audio gap of "+to_string(delta/48)+" ms; resumed at the next audio timestamp");
+  }else if(delta < -96000){warning("Discarded stale audio while keeping video recording");return;}
+  else if(llabs(delta)>=4800){warning(string(delta>0?"Filled missing audio with silence":"Trimmed overlapping audio")+" ("+to_string(llabs(delta)/48)+" ms)");}
+  else if(llabs(delta)>=48 && !softClockWarning){softClockWarning=true;warning("Audio clock drift corrected automatically");}
+  // libswresample aligns the PCM sample clock to device timestamps. Small
+  // differences stretch/squeeze gradually; larger ones insert/drop samples.
+  swr_next_pts(resampler,target*int64_t(48000));
+  convertAudio(data,n);
  }
  void flushAudioUntil(int64_t boundary){
   if(!started)return;
@@ -113,7 +139,7 @@ class Recorder {
    if(a.offset==total){audioPendingBytes-=a.data.size();audioPending.pop_front();}else break;
   }
  }
- void finishSegment(){if(!out)return;if(ve){ck(avcodec_send_frame(ve,nullptr),"Drain video");packet(ve,vs);}audioFrames(true);if(ae){ck(avcodec_send_frame(ae,nullptr),"Drain audio");packet(ae,as);}ck(av_write_trailer(out),"Finalize container");avio_closep(&out->pb);avformat_free_context(out);out=nullptr;avcodec_free_context(&ve);avcodec_free_context(&ae);swr_free(&resampler);av_audio_fifo_free(fifo);fifo=nullptr;started=false;cout<<"SAVED "<<output<<endl;}
+ void finishSegment(){if(!out)return;if(ve){ck(avcodec_send_frame(ve,nullptr),"Drain video");packet(ve,vs);}drainResampler();audioFrames(true);if(ae){ck(avcodec_send_frame(ae,nullptr),"Drain audio");packet(ae,as);}trailerAttempted=true;ck(av_write_trailer(out),"Finalize container");avio_closep(&out->pb);avformat_free_context(out);out=nullptr;avcodec_free_context(&ve);avcodec_free_context(&ae);swr_free(&resampler);av_audio_fifo_free(fifo);fifo=nullptr;started=false;cout<<"SAVED "<<output<<endl;}
  bool recoverFilm()const{return !copy && opt("cadence")=="film32" && std::abs(av_q2d(sourceRate)/av_q2d(outputRate)-2.5)<0.015;}
  double filmDifference(AVFrame*f){
   std::vector<uint8_t> pixels;pixels.reserve(2304);
@@ -197,11 +223,22 @@ public:
  void process(Message&m){if(m.type==0){setup(move(m.data));return;}if(!dec)throw runtime_error("Missing source setup");if(m.pts<0)throw runtime_error("Negative source timestamp");if(m.type==3)return;
   if(m.type==1){if(m.pts<=lastV)throw runtime_error("Video timestamp discontinuity");lastV=m.pts;AVPacket*p=av_packet_alloc();ck(av_new_packet(p,int(m.data.size())),"Allocate source packet");memcpy(p->data,m.data.data(),m.data.size());p->pts=p->dts=m.pts;if(pending.size()>120)throw runtime_error("Source decoder backlog");pending[m.pts]=av_packet_clone(p);ck(avcodec_send_packet(dec,p),"Decode source");receiveFrames();av_packet_free(&p);
   }else if(m.type==2){
-   if(m.pts<=lastA)throw runtime_error("Audio timestamp discontinuity");lastA=m.pts;
+   if(m.pts<=lastA){warning("Discarded an out-of-order audio packet");return;}lastA=m.pts;
    if(m.data.size()%4)throw runtime_error("Unaligned PCM");
-   audioPendingBytes+=m.data.size();if(audioPendingBytes>48000*4*3)throw runtime_error("Video stalled; audio holdback exceeded three seconds");
-   audioPending.push_back({m.pts,move(m.data),0});
+   audioPendingBytes+=m.data.size();audioPending.push_back({m.pts,move(m.data),0});
+   if(audioPendingBytes>48000*4*3){
+    if(started){warning("Video timing stalled; preserved queued audio and continued recording");flushAudioUntil(INT64_MAX);}
+    else{warning("Waiting for a video keyframe; skipped oldest buffered audio");while(audioPendingBytes>48000*4*3){audioPendingBytes-=audioPending.front().data.size();audioPending.pop_front();}}
+   }
   }}
+ void salvage()noexcept{
+  // An unrecoverable I/O/codec failure must still attempt a playable trailer.
+  if(!started || trailerAttempted)return;
+  audioPending.clear();audioPendingBytes=0;
+  try{finishSegment();}catch(...){
+   if(out && out->pb && !trailerAttempted){trailerAttempted=true;if(av_write_trailer(out)>=0){avio_flush(out->pb);cout<<"SAVED "<<output<<endl;}}
+  }
+ }
  void finish(){if(dec){ck(avcodec_send_packet(dec,nullptr),"Flush source decoder");receiveFrames();}emitFilm();if(!started)throw runtime_error("No video keyframe arrived");flushAudioUntil(INT64_MAX);finishSegment();}
 };
-int main(int argc,char**argv){ios::sync_with_stdio(false);cin.tie(nullptr);av_log_set_level(AV_LOG_ERROR);try{for(int i=1;i<argc;++i){string a=argv[i];auto n=a.find('=');if(n!=string::npos)args[a.substr(0,n)]=a.substr(n+1);}Recorder r;Message m;bool end=false;while(readMessage(m)){if(m.type==3){end=true;break;}r.process(m);}if(!end)throw runtime_error("Helper input ended without finish");r.finish();return 0;}catch(const exception&e){cerr<<"ERROR "<<e.what()<<endl;return 1;}}
+int main(int argc,char**argv){ios::sync_with_stdio(false);cin.tie(nullptr);av_log_set_level(AV_LOG_ERROR);try{for(int i=1;i<argc;++i){string a=argv[i];auto n=a.find('=');if(n!=string::npos)args[a.substr(0,n)]=a.substr(n+1);}Recorder r;try{Message m;bool end=false;while(readMessage(m)){if(m.type==3){end=true;break;}r.process(m);}if(!end)throw runtime_error("Helper input ended without finish");r.finish();return 0;}catch(...){r.salvage();throw;}}catch(const exception&e){cerr<<"ERROR "<<e.what()<<endl;return 1;}}

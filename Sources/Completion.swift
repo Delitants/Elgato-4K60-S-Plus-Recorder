@@ -28,7 +28,7 @@ enum ProcessLifecycle {
 /// Reads to EOF independently of the process owner, retaining only a bounded tail.
 final class ProcessOutput {
  private let pipe: Pipe, capacity: Int, lock=NSLock(), done=DispatchSemaphore(value:0)
- private var data=Data()
+ private var data=Data(),retainedWarning:String?
  init(pipe: Pipe, capacity: Int) {
   self.pipe=pipe; self.capacity=capacity
   pipe.fileHandleForReading.readabilityHandler={ [weak self] handle in
@@ -36,11 +36,20 @@ final class ProcessOutput {
    guard let self else {return}
    if chunk.isEmpty { handle.readabilityHandler=nil; self.done.signal(); return }
    self.lock.lock(); self.data.append(chunk)
+   if let warning=BackendProgress.warning(in:String(decoding:self.data,as:UTF8.self)){self.retainedWarning=warning}
    if self.data.count>self.capacity { self.data.removeFirst(self.data.count-self.capacity) }
    self.lock.unlock()
   }
  }
+ var latestWarning:String?{lock.lock();defer{lock.unlock()};return retainedWarning}
  var text: String { lock.lock(); defer{lock.unlock()}; return String(decoding:data,as:UTF8.self) }
  func waitForEOF(seconds:Double=2)->Bool {done.wait(timeout:.now()+seconds) == .success}
  deinit { pipe.fileHandleForReading.readabilityHandler=nil }
+}
+
+/// Helper progress is newline-delimited; do not display a partial pipe read.
+enum BackendProgress {
+ static func warning(in text:String)->String? {
+  text.split(separator:"\n",omittingEmptySubsequences:false).dropLast().last(where:{$0.hasPrefix("WARNING ")}).map{String($0.dropFirst(8))}
+ }
 }

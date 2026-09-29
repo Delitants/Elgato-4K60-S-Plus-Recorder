@@ -14,6 +14,7 @@ final class RecordingSink {
  var duration:Double{lock.lock();defer{lock.unlock()};return elapsed}
  var videoFrames:Int{lock.lock();defer{lock.unlock()};return frames}
  var dropped:Int{0}
+ var warning:String?{helper?.warning}
  var error:Error?{lock.lock();defer{lock.unlock()};return failure}
  private let profile:RecordingProfile
  init(url:URL,profile:RecordingProfile,initialRate:VideoRate?=nil){self.url=url;self.profile=profile;converter=MediaConverter(hevc:profile.captureHEVC,initialRate:initialRate);decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC

@@ -66,6 +66,12 @@ stereo meter continues to show short-term peaks.
 It cannot remove the capture hardware's inherent latency. Under sustained system
 load, preview may skip or resynchronize rather than grow an unbounded delay.
 
+Recoverable audio clock drift is corrected automatically. Timing gaps or overlaps
+may insert silence or trim audio; recording continues with an orange warning.
+Warnings remain visible after completion. An unrecoverable disk/codec error still
+attempts to finalize and expose a partial file, but completion cannot be guaranteed
+if the destination itself is unavailable.
+
 **Stop after** takes `hh:mm:ss` and can be enabled, disabled or edited while
 recording. Press Return or leave the field to apply an edit. The limit is measured
 from the first accepted video keyframe, not from when the checkbox is enabled.

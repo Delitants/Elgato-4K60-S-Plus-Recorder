@@ -108,6 +108,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
     let bitrate=NSTextField(wrappingLabelWithString:"Device video bitrate · waiting for connection")
     let clock=NSTextField(labelWithString:"00:00")
     let stats=NSTextField(labelWithString:"")
+    let recordingWarning=NSTextField(wrappingLabelWithString:"")
     let audioLabel=NSTextField(labelWithString:"HDMI audio · awaiting packets")
     let meter=StereoMeterView(frame:.zero)
     let usbBadge=NSTextField(labelWithString:" USB · checking ")
@@ -178,9 +179,10 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         durationField.toolTip="Hours:minutes:seconds from the actual recording start. Edit during recording and press Return to update the total limit; turning Stop after off removes it."
         countdown.font = .monospacedDigitSystemFont(ofSize:12,weight:.medium)
         let durationControls=NSStackView(views:[durationToggle,durationField,NSTextField(labelWithString:"hh:mm:ss"),countdown,NSView()]);durationControls.spacing=10
-        let stack=NSStackView(views:[top,signal,preview,previewControls,info,durationControls,controls,folderLabel,stats]);stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=14;stack.translatesAutoresizingMaskIntoConstraints=false;root.addSubview(stack)
+        recordingWarning.font = .systemFont(ofSize:12);recordingWarning.textColor = .systemOrange;recordingWarning.isHidden=true
+        let stack=NSStackView(views:[top,signal,preview,previewControls,info,recordingWarning,durationControls,controls,folderLabel,stats]);stack.orientation = .vertical;stack.alignment = .leading;stack.spacing=14;stack.translatesAutoresizingMaskIntoConstraints=false;root.addSubview(stack)
         NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo:root.leadingAnchor,constant:24),stack.trailingAnchor.constraint(equalTo:root.trailingAnchor,constant:-24),stack.topAnchor.constraint(equalTo:root.topAnchor,constant:20),stack.bottomAnchor.constraint(equalTo:root.bottomAnchor,constant:-18),preview.heightAnchor.constraint(greaterThanOrEqualToConstant:260)])
-        for view in [top,signal,preview,info,controls,folderLabel,stats]{view.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive=true}
+        for view in [top,signal,preview,info,recordingWarning,controls,folderLabel,stats]{view.widthAnchor.constraint(equalTo:stack.widthAnchor).isActive=true}
         preview.setContentHuggingPriority(.defaultLow,for:.vertical)
         window.center();window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true)
         // Drain the bounded preview queue up to 60 Hz. The renderer schedules each frame;
@@ -215,8 +217,9 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         updatePreviewVisibility()
         let(s,frames)=engine.snapshot();current=s;preview.show(frames)
         let usbUnsupported=s.usbSpeed>0 && s.usbSpeed<4
-        let warning=usbUnsupported || s.monitoringError != nil || ["waiting","failed","error","retrying","disconnected","warning","unsupported"].contains{ s.status.localizedCaseInsensitiveContains($0) }
-        status.stringValue=s.status;status.textColor=warning ? .systemOrange : (s.recording ? .systemRed : .labelColor)
+        let warning=s.recordingWarning != nil || usbUnsupported || s.monitoringError != nil || ["waiting","failed","error","retrying","disconnected","warning","unsupported"].contains{ s.status.localizedCaseInsensitiveContains($0) }
+        status.stringValue=s.status+(s.recording && s.recordingWarning != nil ? " · warning":"");
+        recordingWarning.stringValue=s.recordingWarning.map{"Recording warning · "+$0} ?? "";recordingWarning.isHidden=s.recordingWarning==nil;status.textColor=warning ? .systemOrange : (s.recording ? .systemRed : .labelColor)
         usbBadge.stringValue=s.usbSpeed>=4 ? (s.usbSpeed>=5 ? " USB 3.1+ · 10+ Gbps ":" USB 3.0 · 5 Gbps ") : (s.usbSpeed==3 ? " USB 2.0 · Unsupported ":usbUnsupported ? " USB · Unsupported ":" USB · not connected ")
         usbBadge.textColor=s.usbSpeed>=4 ? .white : .labelColor
         usbBadge.layer?.backgroundColor=(s.usbSpeed>=4 ? NSColor.systemBlue:NSColor.textBackgroundColor).cgColor

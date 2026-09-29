@@ -25,6 +25,7 @@ final class MediaHelperClient {
    }
   }
  }
+ var warning:String?{stdout?.latestWarning}
  var diagnostic:String{stderr?.text ?? ""}
  var lastSavedURL:URL?{guard let path=stdout?.text.split(separator:"\n").last(where:{$0.hasPrefix("SAVED ")}).map({String($0.dropFirst(6))}),FileManager.default.fileExists(atPath:path) else{return nil};return URL(fileURLWithPath:path)}
  func append(_ sample:CMSampleBuffer,type:UInt8,key:Bool)throws -> Bool {
