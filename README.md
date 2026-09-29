@@ -58,6 +58,11 @@ not an independently measured HDMI input. Frame rate follows measured incoming t
 Video and audio preview toggles are independent of recording. Monitoring volume
 only affects playback through the Mac. Audio uses a bounded, preallocated ring
 buffer, with approximately 64 ms of startup buffering and recovery after a stall.
+When the window is minimized, hidden or fully covered, video presentation is
+flushed. Restoring it resumes from the latest frame rather than replaying queued
+frames. Active capture prevents App Nap; idle system sleep is still allowed
+when not recording. The audio signal label briefly holds its state across silent gaps; the
+stereo meter continues to show short-term peaks.
 It cannot remove the capture hardware's inherent latency. Under sustained system
 load, preview may skip or resynchronize rather than grow an unbounded delay.
 

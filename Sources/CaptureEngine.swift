@@ -7,6 +7,7 @@ struct CaptureState {
     var writtenBytes:Int64=0,usbSpeed=0
     var seconds:Double=0,peak:Double=0
     var peakLeft:Double=0,peakRight:Double=0
+    var audioSignal=false
     var format="Waiting for HDMI video"
     var incomingVideoMbps:Double?,requestedVideoMbps:Int?
     var remaining:Double?
@@ -68,6 +69,10 @@ final class CaptureEngine {
 
     }
     private func run(){
+        // Live USB transport must keep draining even when its window is occluded.
+        // Recording owns a separate, stronger activity that prevents idle sleep.
+        let activity=ProcessInfo.processInfo.beginActivity(options:.userInitiatedAllowingIdleSystemSleep,reason:"Receiving live HDMI video and audio")
+        defer{ProcessInfo.processInfo.endActivity(activity)}
         lock.lock();let profile=self.profile;lock.unlock()
         var error=[CChar](repeating:0,count:512)
         var opened=capture_open_config(profile.captureHEVC ? 1 : 0,profile.capture4K ? 3840 : 1920,profile.capture4K ? 2160 : 1080,Int32(profile.deviceMbps),&error,Int32(error.count))
@@ -116,6 +121,7 @@ final class CaptureEngine {
         let timing=CaptureTiming()
         var deadline=RecordingDeadline()
         var meter=StereoPeakMeter()
+        var audioSignal=AudioSignalIndicator()
         var videoBitrate=IncomingVideoBitrate()
         var recorder:RecordingSink?,buffer=[UInt8](repeating:0,count:16384)
         var lastFrame=Date(),lastStats=Date.distantPast,videoCount=0,audioCount=0,bytes=0
@@ -162,7 +168,9 @@ final class CaptureEngine {
             }
             timing.observe("captureIteration",seconds:ProcessInfo.processInfo.systemUptime-loopStart)
             if let levels=meter.take(now:ProcessInfo.processInfo.systemUptime){
-                change{$0.peakLeft=levels.left;$0.peakRight=levels.right;$0.peak=max(levels.left,levels.right)}
+                let now=ProcessInfo.processInfo.systemUptime
+                audioSignal.observe(peak:max(levels.left,levels.right),now:now)
+                change{$0.peakLeft=levels.left;$0.peakRight=levels.right;$0.peak=max(levels.left,levels.right);$0.audioSignal=audioSignal.isActive(now:now)}
             }
             if Date().timeIntervalSince(lastStats)>0.2 {
                 recorder?.refreshWrittenBytes()
@@ -207,7 +215,7 @@ final class CaptureEngine {
         decoder.close()
         if let r=recorder{finish(r)}
         while snapshot().0.saving {Thread.sleep(forTimeInterval:0.02)}
-        change{$0.connected=false;$0.connecting=false;$0.recording=false;$0.peak=0;$0.peakLeft=0;$0.peakRight=0;$0.usbSpeed=0
+        change{$0.connected=false;$0.connecting=false;$0.recording=false;$0.peak=0;$0.peakLeft=0;$0.peakRight=0;$0.audioSignal=false;$0.usbSpeed=0
             $0.incomingVideoMbps=nil;$0.requestedVideoMbps=nil
             $0.status=terminalError==nil ? "Disconnected" : "Device disconnected"
             $0.detail=terminalError ?? "Capture stopped. Saved recordings are available in your chosen folder."

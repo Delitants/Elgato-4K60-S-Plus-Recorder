@@ -4,7 +4,10 @@ import AVFoundation
 /// Capture-worker meter; independent of playback volume and the audio render callback.
 struct StereoPeakMeter {
  private var left=0,right=0,lastPublication:Double?
+ private var hasSamples=false
  mutating func append(_ data:Data) {
+  guard data.count>=4 else{return}
+  hasSamples=true
   data.withUnsafeBytes{raw in
    let bytes=raw.bindMemory(to:UInt8.self)
    for offset in stride(from:0,to:bytes.count-bytes.count%4,by:4) {
@@ -15,8 +18,10 @@ struct StereoPeakMeter {
  }
  mutating func take(now:Double)->(left:Double,right:Double)? {
   if let lastPublication,now-lastPublication<0.02{return nil}
+  // USB packets arrive in bursts; an empty poll is not PCM silence.
+  if !hasSamples,let lastPublication,now-lastPublication<0.15{return nil}
   lastPublication=now
-  defer{left=0;right=0}
+  defer{left=0;right=0;hasSamples=false}
   return (Double(left)/32768,Double(right)/32768)
  }
 }
@@ -116,4 +121,13 @@ final class AudioMonitor {
  var diagnostics:[String:Double]{var d=ring.diagnostics;d["audioPackets"]=Double(packets);d["maxArrivalGapMs"]=maxArrivalGap*1000;d["sourceTimestampGaps"]=Double(sourceGaps);return d}
  func stop(){configure(enabled:false,volume:appliedVolume ?? 1)}
  deinit{engine.stop()}
+}
+
+/// The label describes recent audible signal, not individual PCM sample windows.
+struct AudioSignalIndicator {
+ private var lastSound:Double?
+ mutating func observe(peak:Double,now:Double){
+  if peak.isFinite && peak>=0.0001{lastSound=now}
+ }
+ func isActive(now:Double)->Bool{lastSound.map{now-$0<0.75} ?? false}
 }

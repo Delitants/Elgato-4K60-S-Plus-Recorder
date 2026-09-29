@@ -8,9 +8,23 @@ final class PreviewView:NSView {
     override func layout(){super.layout();CATransaction.begin();CATransaction.setDisableActions(true);videoLayer.frame=bounds;CATransaction.commit()}
     private var clock=PreviewPresentationClock()
     private var pending=PreviewFrameQueue<CMSampleBuffer>()
-    func clear(){clock.reset();pending.reset();videoLayer.sampleBufferRenderer.flush(removingDisplayedImage:true,completionHandler:nil)}
+    private var presentationActive=false,resumeAtLiveEdge=true
+    private var lastDelivery:Double?
+    func setPresentationActive(_ active:Bool){
+        guard active != presentationActive else{return}
+        presentationActive=active;clear()
+    }
+    func clear(){clock.reset();pending.reset();lastDelivery=nil;resumeAtLiveEdge=true;videoLayer.sampleBufferRenderer.flush(removingDisplayedImage:true,completionHandler:nil)}
     func show(_ samples:[CMSampleBuffer]){
-        for sample in samples{pending.append(sample,pts:CMSampleBufferGetPresentationTimeStamp(sample).seconds)}
+        guard presentationActive else{return}
+        let now=CMClockGetTime(CMClockGetHostTimeClock()).seconds
+        // A blocked main run loop can miss visibility events (minimize animation,
+        // workspace switch). Resume at the live edge instead of replaying its batch.
+        if let lastDelivery,now-lastDelivery>0.2{clear()}
+        lastDelivery=now
+        let fresh=resumeAtLiveEdge ? Array(samples.suffix(1)):samples
+        if !fresh.isEmpty{resumeAtLiveEdge=false}
+        for sample in fresh{pending.append(sample,pts:CMSampleBufferGetPresentationTimeStamp(sample).seconds)}
         while let sample=pending.first{
             guard showFrame(sample) else{break}
             pending.removeFirst()
@@ -187,6 +201,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
     func refresh(){
         #if PREVIEW_DIAGNOSTICS
         PreviewTrace.shared.event(4)
+        PreviewTrace.shared.event(10,window.isMiniaturized ? 1:0,window.occlusionState.contains(.visible) && !NSApp.isHidden ? 1:0)
+        PreviewTrace.shared.event(11,current.peak,current.audioSignal ? 1:0)
         let traceNow=ProcessInfo.processInfo.systemUptime
         if traceNow-lastPreviewTrace>5 {
             lastPreviewTrace=traceNow
@@ -196,7 +212,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
             PreviewTrace.shared.save()
         }
         #endif
-        let(s,frames)=engine.snapshot();current=s;if videoToggle.state == .on{preview.show(frames)}
+        updatePreviewVisibility()
+        let(s,frames)=engine.snapshot();current=s;preview.show(frames)
         let usbUnsupported=s.usbSpeed>0 && s.usbSpeed<4
         let warning=usbUnsupported || s.monitoringError != nil || ["waiting","failed","error","retrying","disconnected","warning","unsupported"].contains{ s.status.localizedCaseInsensitiveContains($0) }
         status.stringValue=s.status;status.textColor=warning ? .systemOrange : (s.recording ? .systemRed : .labelColor)
@@ -216,7 +233,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         record.title=s.recording ? "Stop Recording" : "Record";record.isEnabled=s.connected && !s.saving
         connect.title=s.connected || s.connecting ? "Disconnect" : "Connect";connect.isEnabled = !s.saving && !s.connecting
         meter.update(left:s.peakLeft,right:s.peakRight)
-        audioLabel.stringValue=s.audioFrames==0 ? "HDMI audio · awaiting packets" : (s.peak<0.0001 ? "HDMI audio · silent" : "HDMI audio · signal detected")
+        audioLabel.stringValue=s.audioFrames==0 ? "HDMI audio · awaiting packets" : (s.audioSignal ? "HDMI audio · signal detected" : "HDMI audio · silent")
         stats.stringValue="\(s.videoFrames) video frames  ·  \(s.audioFrames) audio samples  ·  \(s.writtenBytes/1_000_000) MB written  ·  \(s.discarded) discarded"
         reveal.isEnabled=s.lastFile != nil
         settings.isEnabled = !s.recording && !s.saving && !s.connecting
@@ -236,11 +253,20 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         }
         window.beginSheet(settingsController!.window)
     }
+    private func updatePreviewVisibility(){
+        guard let window else{return}
+        preview.setPresentationActive(videoToggle.state == .on && window.isVisible && !window.isMiniaturized && window.occlusionState.contains(.visible) && !NSApp.isHidden)
+    }
+    func windowDidMiniaturize(_ notification:Notification){updatePreviewVisibility()}
+    func windowDidDeminiaturize(_ notification:Notification){updatePreviewVisibility()}
+    func windowDidChangeOcclusionState(_ notification:Notification){updatePreviewVisibility()}
+    func applicationDidHide(_ notification:Notification){updatePreviewVisibility()}
+    func applicationDidUnhide(_ notification:Notification){updatePreviewVisibility()}
     @objc func previewChanged(){
         let video=videoToggle.state == .on,audio=audioToggle.state == .on
         volume.isEnabled=audio
         engine.setPreview(video:video,audio:audio,volume:volume.floatValue)
-        if !video { preview.clear() }
+        updatePreviewVisibility()
     }
     private func recordingLimit()throws->Double {
         guard durationToggle.state == .on else{return 0}

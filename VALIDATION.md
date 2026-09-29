@@ -1,6 +1,8 @@
 # Validation — 2026-09-27
 
-Current update: [0.6.3 background recording validation](docs/VALIDATION-0.6.3.md).
+Current update: [0.6.4 preview restore validation](docs/VALIDATION-0.6.4.md).
+
+Previous: [0.6.3 background recording validation](docs/VALIDATION-0.6.3.md).
 
 Previous: [0.6.0 hardware constant-quality validation](docs/VALIDATION-0.6.0.md).
 Previous: [0.5.1 incoming bitrate and format validation](docs/VALIDATION-0.5.1.md).
