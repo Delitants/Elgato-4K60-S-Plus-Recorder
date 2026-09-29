@@ -62,8 +62,20 @@ before app-bundle signing. The package was signed by NewTek (W8U66ET244).
 
 ## Tests
 
-Run `test.sh`, `test-hdr.sh`, `test-advanced.sh`, and `test-ndi.sh` as documented
-in the README. Hardware codec tests need normal macOS VideoToolbox access.
+Tests require FFmpeg/ffprobe and Xcode command-line tools. Point the helper
+variables at a built app:
+
+```sh
+bash test.sh
+bash test-hdr.sh
+bash test-fps.sh
+MEDIA_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/MediaHelper' bash test-advanced.sh
+MEDIA_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/MediaHelper' bash test-audio-recovery.sh
+NDI_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/NDISender' \
+NDI_RUNTIME='/path/to/Elgato Recorder.app/Contents/Frameworks/libndi.dylib' bash test-ndi.sh
+```
+
+Hardware codec tests need normal macOS VideoToolbox access.
 `TEST_HEVC=1` makes the recording matrix use HEVC source fixtures.
 The fixtures are bounded and trap-cleaned; tests never write to the user's
 recording folder.
@@ -76,7 +88,7 @@ builds omit that flag.
 Version 0.4.0 rebuilds FFmpeg with `-mmacosx-version-min=26.0` in both compiler
 and linker flags. All bundled Mach-O minimum OS versions are audited before
 packaging. Version 0.3.0 unintentionally contained FFmpeg dylibs declaring 27.0
-despite the app's 26.0 minimum; use 0.4.0 on macOS 26. Actual runtime testing was
+despite the app's 26.0 minimum; use 0.4.0 or later on macOS 26. Actual runtime testing was
 on macOS 27. `test-fps.sh` checks integer/fractional rates, no upsampling,
 audio continuity, original-stream rejection, and unaligned-keyframe splitting.
 
