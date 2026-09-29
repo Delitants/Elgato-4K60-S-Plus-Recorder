@@ -4,7 +4,7 @@ A native macOS app for recording HDMI video and stereo audio from the
 **Elgato Game Capture 4K60 S+ (20GAP9901)** over USB.
 Independent community software, not affiliated with Elgato or Corsair.
 
-**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.8** · macOS 26+
+**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.9** · macOS 26+
 
 ![Elgato Game Capture 4K60 S+](docs/images/elgato-4k60-s-plus.png)
 
@@ -59,8 +59,10 @@ counts from the recording's original start time.
   are unsupported.
 - AV1 is software-only and can be too slow for real-time capture. Hardware CQ
   requires Apple Silicon. Hardware H.264 requires B-frames disabled.
-- Recoverable audio timing errors warn and continue. Disk failures or sustained
-  encoder overload may still stop recording; partial-file finalization is best effort.
+- Recoverable timing errors and recording queue stalls warn and continue. Queue
+  recovery may skip a short section to the next keyframe. Disk failures or a dead
+  or persistently blocked encoder can still stop recording; saving a partial file
+  is best effort.
 - Apple Silicon was tested on an M1 Pro. Intel was tested through Rosetta,
   not on a physical Intel Mac. See [validation details](VALIDATION.md).
 

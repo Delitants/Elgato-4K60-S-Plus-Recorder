@@ -69,6 +69,8 @@ variables at a built app:
 bash test.sh
 # Included in test.sh; also runnable separately (requires libusb):
 bash test-window-lifecycle.sh
+# Pauses only its own disposable helper; never the live capture process:
+TEST_MATRIX=1 bash test-backpressure.sh "/path/to/Elgato Recorder.app"
 bash test-hdr.sh
 bash test-fps.sh
 bash test-rate-recovery.sh "/path/to/Elgato Recorder.app"

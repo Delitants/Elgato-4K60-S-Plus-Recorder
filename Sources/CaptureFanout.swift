@@ -67,6 +67,10 @@ final class QueueBudget {
  private var firstOffer:UInt64?
  init(maxBytes:Int=64*1024*1024,maxAge:UInt64=2_000_000,startupGrace:UInt64=0,clock:@escaping()->UInt64={DispatchTime.now().uptimeNanoseconds/1000}){self.maxBytes=maxBytes;self.maxAge=maxAge;self.startupGrace=startupGrace;self.clock=clock}
  var bytes:Int{lock.lock();defer{lock.unlock()};return used}
+ var backlog:(bytes:Int,seconds:Double){
+  lock.lock();defer{lock.unlock()};let now=clock()
+  return (used,entries.first.map{now >= $0.1 ? Double(now-$0.1)/1e6:0} ?? 0)
+ }
  func reserve(bytes:Int)->Bool{
   lock.lock();defer{lock.unlock()}
   guard bytes>=0,bytes<=maxBytes-used else{return false}

@@ -30,7 +30,7 @@ static uint32_t u32(const uint8_t*p){return p[0]|uint32_t(p[1])<<8|uint32_t(p[2]
 static int64_t i64(const uint8_t*p){uint64_t v=0;for(int i=7;i>=0;--i)v=(v<<8)|p[i];return (int64_t)v;}
 static bool exact(uint8_t*p,size_t n,bool eof=false){cin.read((char*)p,n);auto got=cin.gcount();if(!got&&eof&&cin.eof())return false;if(got!=(streamsize)n)throw runtime_error("Truncated IPC message");return true;}
 struct Message{int type;int64_t pts;vector<uint8_t> data;};
-static bool readMessage(Message&m){uint8_t h[16];if(!exact(h,16,true))return false;uint32_t tag=u32(h),len=u32(h+4);if((tag&0xffffff00)!=0x454c4700 || (tag&255)>3 || len>16*1024*1024)throw runtime_error("Invalid IPC header or oversized payload");m.type=tag&255;m.pts=i64(h+8);m.data.resize(len);exact(m.data.data(),len);return true;}
+static bool readMessage(Message&m){uint8_t h[16];if(!exact(h,16,true))return false;uint32_t tag=u32(h),len=u32(h+4);if((tag&0xffffff00)!=0x454c4700 || (tag&255)>4 || len>16*1024*1024)throw runtime_error("Invalid IPC header or oversized payload");m.type=tag&255;m.pts=i64(h+8);m.data.resize(len);exact(m.data.data(),len);return true;}
 class Recorder {
  struct AudioChunk {int64_t pts; vector<uint8_t> data; int offset=0;};
  deque<AudioChunk> audioPending;size_t audioPendingBytes=0;
@@ -246,6 +246,14 @@ public:
   if(num("decoder")!=2){int r=av_hwdevice_ctx_create(&hw,AV_HWDEVICE_TYPE_VIDEOTOOLBOX,nullptr,nullptr,0);if(r>=0){dec->hw_device_ctx=av_buffer_ref(hw);dec->get_format=hardwareFormat;}else if(num("decoder")==1)ck(r,"Required hardware decoder");}
   ck(avcodec_open2(dec,c,nullptr),"Open source decoder");}
  void process(Message&m){if(m.type==0){setup(move(m.data));return;}if(!dec)throw runtime_error("Missing source setup");if(m.pts<0)throw runtime_error("Negative source timestamp");if(m.type==3)return;
+  if(m.type==4){
+   // A complete IPC control message precedes the next random-access packet.
+   // Flush delayed pre-gap pictures, then discard decoder reference state.
+   ck(avcodec_send_packet(dec,nullptr),"Drain decoder before recovery");receiveFrames();emitFilm();
+   avcodec_flush_buffers(dec);for(auto &entry:pending)av_packet_free(&entry.second);pending.clear();
+   filmTimeline=FilmTimeline();filmCadence=FilmCadence();filmPrevious.clear();filmOrigin=AV_NOPTS_VALUE;filmLastPTS=AV_NOPTS_VALUE;filmKey=false;carrierIntervals.clear();
+   warning("Recording input resumed at a keyframe after a backlog; timestamps preserve the gap");return;
+  }
   if(m.type==1){if(m.pts<=lastV)throw runtime_error("Video timestamp discontinuity");lastV=m.pts;AVPacket*p=av_packet_alloc();ck(av_new_packet(p,int(m.data.size())),"Allocate source packet");memcpy(p->data,m.data.data(),m.data.size());p->pts=p->dts=m.pts;if(pending.size()>120)throw runtime_error("Source decoder backlog");pending[m.pts]=av_packet_clone(p);ck(avcodec_send_packet(dec,p),"Decode source");receiveFrames();av_packet_free(&p);
   }else if(m.type==2){
    if(m.pts<=lastA){warning("Discarded an out-of-order audio packet");return;}lastA=m.pts;

@@ -41,6 +41,19 @@ final class TerminationTestApplication:NSApplication {
         let limit=Date().addingTimeInterval(1)
         while Date()<limit{RunLoop.main.run(until:Date().addingTimeInterval(0.01))}
         guard app.replies==[true] else{print("FAIL deferred termination replies: \(app.replies)");exit(1)}
+        let editing=controller()
+        editing.setupMenu()
+        let actions=NSApp.mainMenu?.items.flatMap{$0.submenu?.items ?? []}.compactMap{$0.action} ?? []
+        guard actions.contains(#selector(NSText.selectAll(_:))),actions.contains(#selector(NSText.paste(_:))) else{print("FAIL standard text editing shortcuts missing");exit(1)}
+        guard !editing.durationField.isAutomaticTextCompletionEnabled,!editing.durationField.allowsWritingTools else{print("FAIL timer permits text suggestion popups");exit(1)}
+        guard let editor=editing.windowWillReturnFieldEditor(editing.window,to:editing.durationField) as? NSTextView,
+              editor.isFieldEditor,!editor.isAutomaticTextCompletionEnabled,editor.inlinePredictionType == .no,
+              editor.mathExpressionCompletionType == .no,editor.writingToolsBehavior == .none,
+              editing.windowWillReturnFieldEditor(editing.window,to:NSTextField()) == nil else{print("FAIL timer editor text-service isolation");exit(1)}
+        guard editing.control(editing.durationField,textView:editor,doCommandBy:#selector(NSResponder.cancelOperation(_:))),
+              editing.control(editing.durationField,textView:editor,doCommandBy:#selector(NSTextView.complete(_:))),
+              !editing.control(editing.durationField,textView:editor,doCommandBy:#selector(NSText.insertNewline(_:))) else{print("FAIL timer escape/completion commands");exit(1)}
+        print("PASS timer suggestions disabled, dedicated editor, Escape handled, standard editing shortcuts present")
         print("PASS window-close and quit stop UI refresh; unrelated windows remain active; one deferred termination reply")
     }
 }

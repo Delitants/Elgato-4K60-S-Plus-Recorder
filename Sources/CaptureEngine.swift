@@ -146,7 +146,7 @@ final class CaptureEngine {
                     videoBitrate.observe(type:frame.type,bytes:frame.data.count,now:ProcessInfo.processInfo.systemUptime)
                     do {
                         guard let(sample,key)=try timing.measure("mediaConvert",{try converter.convert(frame)}) else{continue}
-                        if let r=recorder,!r.offer(frame){finish(r);recorder=nil;deadline.clear();change{$0.status="Recording error";$0.detail=r.error?.localizedDescription ?? "Recording stopped"}}
+                        if let r=recorder,!r.offer(frame,key:key){finish(r);recorder=nil;deadline.clear();change{$0.status="Recording error";$0.detail=r.error?.localizedDescription ?? "Recording stopped"}}
                         if frame.type==0xc1 {
                             videoCount+=1;lastFrame=Date()
                             #if PREVIEW_DIAGNOSTICS

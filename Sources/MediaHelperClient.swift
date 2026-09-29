@@ -9,22 +9,24 @@ final class MediaHelperClient {
  private let process=Process(),input=Pipe(),output=Pipe(),errors=Pipe(),lock=NSLock()
  private var stdout: ProcessOutput?, stderr: ProcessOutput?
  private var started=false,format:CMFormatDescription?
- private var startupGraceUntil=0.0
+ private var writeFailed=false
  let url:URL,profile:RecordingProfile
  init(url:URL,profile:RecordingProfile){self.url=url;self.profile=profile}
  private func message(_ type:UInt32,_ pts:Int64,_ data:Data=Data())throws{
   var packet=Data();for var n in [UInt32(0x454c4700)|type,UInt32(data.count)]{n=n.littleEndian;withUnsafeBytes(of:&n){packet.append(contentsOf:$0)}}
   var time=pts.littleEndian;withUnsafeBytes(of:&time){packet.append(contentsOf:$0)};packet.append(data)
-  // Cold process loading (especially Rosetta) can exceed two seconds. The
-  // absolute grace expires once; ordinary writes keep their two-second bound.
-  let fd=input.fileHandleForWriting.fileDescriptor;let deadline=max(ProcessInfo.processInfo.systemUptime+2.0,startupGraceUntil)
+  // QueueBudget bounds retained input while the sink drops to a keyframe.
+  // Finish an in-flight IPC packet across a temporary stall: abandoning part
+  // of its header/payload would corrupt the helper protocol on the next write.
+  let fd=input.fileHandleForWriting.fileDescriptor;let deadline=ProcessInfo.processInfo.systemUptime+30.0
   try packet.withUnsafeBytes{raw in var offset=0
    while offset<raw.count {
     let n=Darwin.write(fd,raw.baseAddress!.advanced(by:offset),raw.count-offset)
     if n>0 {offset+=n;continue}
     if errno==EINTR{continue}
     if errno==EAGAIN && ProcessInfo.processInfo.systemUptime<deadline{var p=pollfd(fd:fd,events:Int16(POLLOUT),revents:0);_ = poll(&p,1,10);continue}
-    throw BackendWriteError(diagnostic:diagnostic)
+    writeFailed=true
+    throw BackendWriteError(diagnostic:diagnostic.isEmpty ? "Encoder input stalled for 30 seconds or its pipe closed; attempted to finalize the partial recording.":diagnostic)
    }
   }
  }
@@ -49,7 +51,7 @@ final class MediaHelperClient {
    process.executableURL=executable;process.arguments=settings.sorted{$0.key<$1.key}.map{"\($0.key)=\($0.value)"}
    process.standardInput=input;process.standardOutput=output;process.standardError=errors
    stdout=ProcessOutput(pipe:output,capacity:32768);stderr=ProcessOutput(pipe:errors,capacity:8192)
-   try process.run();startupGraceUntil=ProcessInfo.processInfo.systemUptime+10.0
+   try process.run()
    input.fileHandleForReading.closeFile();output.fileHandleForWriting.closeFile();errors.fileHandleForWriting.closeFile()
    let fd=input.fileHandleForWriting.fileDescriptor;_ = fcntl(fd,F_SETFL,fcntl(fd,F_GETFL)|O_NONBLOCK);_ = fcntl(fd,F_SETNOSIGPIPE,1)
    started=true;format=f;try message(0,0,extra)
@@ -61,9 +63,12 @@ final class MediaHelperClient {
   try message(type==0xc1 ? 1:2,CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value,data)
   return true
  }
+ func resumeAfterGap()throws {
+  if started {try message(4,0)}
+ }
  func finish()throws -> URL {
   guard started else{throw RecorderError(message:"No video keyframe arrived")}
-  var error:Error?;do{try message(3,0)}catch let e{error=e};input.fileHandleForWriting.closeFile()
+  var error:Error?;if !writeFailed{do{try message(3,0)}catch let e{error=e}};input.fileHandleForWriting.closeFile()
   let deadline=ProcessInfo.processInfo.systemUptime+30
   while process.isRunning && ProcessInfo.processInfo.systemUptime<deadline{Thread.sleep(forTimeInterval:0.02)}
   if process.isRunning{ProcessLifecycle.stop(process);throw RecorderError(message:"Recording backend timed out while finalizing")}

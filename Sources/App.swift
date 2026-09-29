@@ -121,7 +121,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
     let audioToggle=NSButton(checkboxWithTitle:"Audio preview",target:nil,action:nil)
     let volume=NSSlider(value:0.7,minValue:0,maxValue:1,target:nil,action:nil)
     let durationToggle=NSButton(checkboxWithTitle:"Stop after",target:nil,action:nil)
-    let durationField=NSTextField(string:"00:30:00")
+    let durationField:NSTextField={
+        let field=NSTextField(string:"00:30:00")
+        field.isAutomaticTextCompletionEnabled=false
+        field.allowsWritingTools=false
+        return field
+    }()
     let countdown=NSTextField(labelWithString:"")
     private var appliedRecordingLimit:Double?
     private var durationValidation:String?
@@ -205,6 +210,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         let main=NSMenu();let item=NSMenuItem();main.addItem(item);let appMenu=NSMenu();item.submenu=appMenu
         appMenu.addItem(withTitle:"About Elgato Recorder",action:#selector(NSApplication.orderFrontStandardAboutPanel(_:)),keyEquivalent:"")
         appMenu.addItem(.separator());appMenu.addItem(withTitle:"Quit Elgato Recorder",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
+        let editItem=NSMenuItem();main.addItem(editItem);let edit=NSMenu(title:"Edit");editItem.submenu=edit
+        edit.addItem(withTitle:"Cut",action:#selector(NSText.cut(_:)),keyEquivalent:"x")
+        edit.addItem(withTitle:"Copy",action:#selector(NSText.copy(_:)),keyEquivalent:"c")
+        edit.addItem(withTitle:"Paste",action:#selector(NSText.paste(_:)),keyEquivalent:"v")
+        edit.addItem(withTitle:"Select All",action:#selector(NSText.selectAll(_:)),keyEquivalent:"a")
         NSApp.mainMenu=main
     }
     #if PREVIEW_DIAGNOSTICS
@@ -244,7 +254,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         if usbUnsupported{detail.stringValue += " · USB 2 is unsupported; a USB 3 cable and port are required."}
         detail.textColor=warning ? .systemOrange : .secondaryLabelColor
         let seconds=Int(s.seconds);clock.stringValue=String(format:"%02d:%02d:%02d",seconds/3600,(seconds/60)%60,seconds%60)
-        record.title=s.recording ? "Stop Recording" : "Record";record.isEnabled=s.connected && !s.saving
+        record.attributedTitle=NSAttributedString(string:s.recording ? "● Stop Recording":"Record",attributes:[
+            .font:NSFont.systemFont(ofSize:13,weight:.semibold),
+            .foregroundColor:s.recording ? NSColor.systemRed:NSColor.labelColor
+        ])
+        record.setAccessibilityLabel(s.recording ? "Stop Recording — recording in progress":"Record")
+        record.isEnabled=s.connected && !s.saving
         connect.title=s.connected || s.connecting ? "Disconnect" : "Connect";connect.isEnabled = !s.saving && !s.connecting
         meter.update(left:s.peakLeft,right:s.peakRight)
         audioLabel.stringValue=s.audioFrames==0 ? "HDMI audio · awaiting packets" : (s.audioSignal ? "HDMI audio · signal detected" : "HDMI audio · silent")
@@ -308,6 +323,31 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSWindowDelegate,NSTextFi
         }catch{durationValidation="Use hh:mm:ss; current limit unchanged.";durationField.textColor = .systemOrange}
     }
     func controlTextDidEndEditing(_ notification:Notification){if let field=notification.object as? NSTextField,field === durationField{durationEdited()}}
+    private lazy var durationEditor:NSTextView={
+        // A dedicated editor keeps numeric-input settings out of other fields.
+        let editor=NSTextView()
+        editor.isFieldEditor=true
+        editor.isAutomaticTextCompletionEnabled=false
+        editor.inlinePredictionType = .no
+        editor.mathExpressionCompletionType = .no
+        editor.writingToolsBehavior = .none
+        editor.isContinuousSpellCheckingEnabled=false
+        editor.isGrammarCheckingEnabled=false
+        editor.isAutomaticSpellingCorrectionEnabled=false
+        return editor
+    }()
+    func windowWillReturnFieldEditor(_ sender:NSWindow,to client:Any?)->Any?{
+        guard let field=client as? NSTextField,field === durationField else{return nil}
+        return durationEditor
+    }
+    func control(_ control:NSControl,textView:NSTextView,doCommandBy command:Selector)->Bool{
+        guard control === durationField else{return false}
+        if command == #selector(NSResponder.cancelOperation(_:)){
+            control.window?.makeFirstResponder(nil)
+            return true
+        }
+        return command == #selector(NSTextView.complete(_:))
+    }
     @objc func toggleConnection(){if current.connected{engine.disconnect()}else{preview.clear();engine.connect()}}
     @objc func toggleRecording(){
         refresh()

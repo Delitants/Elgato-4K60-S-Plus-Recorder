@@ -4,7 +4,8 @@ final class RecordingSink {
  private let queue=DispatchQueue(label:"Elgato.Recording",qos:.userInitiated),lock=NSLock(),budget:QueueBudget
  private let converter:MediaConverter,decoder=PreviewDecoder(),native:MovieRecorder?,helper:MediaHelperClient?
  private var recordingRate:VideoRate?
- private var timingWarning:String?
+ private var timingWarning:String?,recoveryWarning:String?
+ private var recovering=false,recoveryCount=0,skipped=0
  private var recordingActivity:NSObjectProtocol?
  private var failure:Error?,ended=false,frames=0,elapsed=0.0,origin:UInt64?
  private var acceptedAt:Double?,fileSize:Int64=0,refreshPending=false
@@ -14,10 +15,10 @@ final class RecordingSink {
  var writtenBytes:Int64{lock.lock();defer{lock.unlock()};return fileSize}
  var duration:Double{lock.lock();defer{lock.unlock()};return elapsed}
  var videoFrames:Int{lock.lock();defer{lock.unlock()};return frames}
- var dropped:Int{0}
+ var dropped:Int{lock.lock();defer{lock.unlock()};return skipped}
  var warning:String?{
-  lock.lock();let timing=timingWarning;lock.unlock()
-  let messages=[timing,helper?.warning].compactMap{$0}
+  lock.lock();let timing=timingWarning,recovery=recoveryWarning;lock.unlock()
+  let messages=[recovery,timing,helper?.warning].compactMap{$0}
   return messages.isEmpty ? nil:messages.joined(separator:" · ")
  }
  var error:Error?{lock.lock();defer{lock.unlock()};return failure}
@@ -45,13 +46,38 @@ final class RecordingSink {
   queue.async{self.updateWrittenBytes();self.lock.lock();self.refreshPending=false;self.lock.unlock()}
  }
  private func updateWrittenBytes(){let count=fileBytes.measure();lock.lock();fileSize=count;lock.unlock()}
- func offer(_ frame:DeviceFrame)->Bool{
+ func offer(_ frame:DeviceFrame,key:Bool?=nil)->Bool{
   let offeredAt=ProcessInfo.processInfo.systemUptime
   lock.lock();defer{lock.unlock()};guard !ended,failure==nil else{return false}
-  guard budget.reserve(bytes:frame.data.count) else{failure=RecorderError(message:"Recording cannot keep up. Lower encoder effort or output resolution.");return false}
+  var resume=false
+  if recovering {
+   // Drain all accepted packets first. Audio and predictive video are skipped
+   // together until a fresh random-access picture; source timestamps retain the gap.
+   let keyframe=frame.type==0xc1 && (key ?? MediaConverter.nals(frame.data).contains{nal in
+    guard let byte=nal.first else{return false}
+    return profile.captureHEVC ? (16...21).contains((byte>>1)&63):byte&31==5
+   })
+   guard budget.bytes==0,keyframe else{skipped+=1;return true}
+   resume=true
+  }
+  guard budget.reserve(bytes:frame.data.count) else{
+   if !recovering {
+    recoveryCount+=1;let backlog=budget.backlog
+    recoveryWarning=String(format:"Recording backlog %.1f s / %.1f MB; recovering at the next keyframe (event %d)",backlog.seconds,Double(backlog.bytes)/1e6,recoveryCount)
+    NSLog("%@",recoveryWarning!)
+   }
+   recovering=true;skipped+=1;return true
+  }
+  if resume {
+   recovering=false
+   recoveryWarning="Recording recovered at a keyframe · \(recoveryCount) backlog event(s), \(skipped) input packets skipped; a brief A/V gap may be visible"
+   NSLog("%@",recoveryWarning!)
+  }
   queue.async{defer{self.budget.release(bytes:frame.data.count)}
    do {
-    guard self.error==nil,let(sample,key)=try self.converter.convert(frame) else{return}
+    guard self.error==nil else{return}
+    if resume {self.decoder.close();try self.helper?.resumeAfterGap()}
+    guard let(sample,key)=try self.converter.convert(frame) else{return}
     if frame.type==0xc1,let rate=self.converter.frameTiming.rate {
      if let previous=self.recordingRate,abs(previous.fps-rate.fps)/previous.fps>0.01 {
       // FPS is a rolling estimate, not a codec-format change. Keep the existing
