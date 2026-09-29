@@ -16,6 +16,12 @@ import Foundation
   assert(startup.reserve(bytes:1024));now=750_000
   assert(startup.reserve(bytes:1024),"Cold encoder startup must not fail after half a second")
   now=2_000_001;assert(!startup.reserve(bytes:1),"A stalled recorder must remain bounded")
+  now=0;let cold=QueueBudget(maxBytes:10,startupGrace:10_000_000,clock:{now})
+  assert(cold.reserve(bytes:6));now=3_000_000;assert(cold.reserve(bytes:4))
+  assert(!cold.reserve(bytes:1),"Startup must retain the hard memory limit")
+  cold.release(bytes:6);cold.release(bytes:4)
+  now=9_000_000;assert(cold.reserve(bytes:1));now=11_000_001
+  assert(!cold.reserve(bytes:1),"Draining must not renew startup grace; normal age limit resumes")
   let folder=FileManager.default.temporaryDirectory.appendingPathComponent("ElgatoFileBytes-\(UUID().uuidString)")
   try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
   defer{try? FileManager.default.removeItem(at:folder)}

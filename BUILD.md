@@ -69,6 +69,9 @@ variables at a built app:
 bash test.sh
 bash test-hdr.sh
 bash test-fps.sh
+bash test-rate-recovery.sh "/path/to/Elgato Recorder.app"
+# For an Intel bundle on Apple Silicon (requires Rosetta):
+TEST_ARCH=x86_64 bash test-rate-recovery.sh "/path/to/Intel/Elgato Recorder.app"
 MEDIA_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/MediaHelper' bash test-advanced.sh
 MEDIA_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/MediaHelper' bash test-audio-recovery.sh
 NDI_HELPER='/path/to/Elgato Recorder.app/Contents/MacOS/NDISender' \

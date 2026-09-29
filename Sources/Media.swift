@@ -90,6 +90,76 @@ final class MediaConverter {
         return sample.map{($0,key)}
     }
 }
+/// Select decoded preview/NDI samples on the requested output timeline.
+final class PreviewSampleSelector {
+    private var selector=FrameSelector(),phase=FilmCadencePhase()
+    private var held=[CMSampleBuffer](),differences=[Double](),previousPixels=[Int]()
+    private var anchor:Double?,lastInput:Int64?,lastOutput:Int64?,activeFilm=false
+    private var stableCarrierFrames=30
+    private var filmRate:VideoRate?
+    func select(_ sample:CMSampleBuffer,incoming:VideoRate,output:VideoRate,film:Bool)->[CMSampleBuffer] {
+        let pts=CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value
+        let previousInput=lastInput
+        if let previousInput,pts<previousInput{resetFilm();selector=FrameSelector();lastOutput=nil}
+        defer{lastInput=pts}
+        // Allow short estimator jitter around a 60 Hz carrier, while a genuine
+        // lower-rate stream falls back to ordinary timestamp-based selection.
+        let wantsFilm=film && abs(incoming.fps/output.fps-2.5)<0.2
+        if wantsFilm,let previousInput {
+            let interval=Double(pts-previousInput)*incoming.fps/1e6
+            // The device can legitimately alternate ~10/20 ms intervals at
+            // 59.94 Hz. Short jitter is not a missing carrier frame.
+            if interval<=0 || interval>1.6{stableCarrierFrames=0}
+            else{stableCarrierFrames=min(30,stableCarrierFrames+1)}
+        }
+        let useFilm=wantsFilm && stableCarrierFrames==30
+        if useFilm != activeFilm || (useFilm && filmRate != output) {
+            resetFilm();selector=FrameSelector();activeFilm=useFilm;filmRate=output
+        }
+        if useFilm,let pixels=fingerprint(sample) {
+            if let previousInput,pts<=previousInput || Double(pts-previousInput)>1e6/incoming.fps*1.6 {resetFilm()}
+            let difference=previousPixels.count==pixels.count ? Double(zip(pixels,previousPixels).reduce(0){$0+abs($1.0-$1.1)})/Double(pixels.count) : .nan
+            previousPixels=pixels;held.append(sample);differences.append(difference)
+            guard held.count==5 else{return []}
+            let sourcePTS=CMSampleBufferGetPresentationTimeStamp(held[0]).seconds*1e6,period=1e6/output.fps
+            if let old=anchor {let next=old+2*period;anchor=next+(sourcePTS-next)/8}else{anchor=sourcePTS}
+            let selected=phase.select(differences)
+            let result=selected.enumerated().compactMap{index,carrier in retimed(held[carrier],pts:Int64((anchor!+Double(index)*period).rounded()),rate:output)}
+            held.removeAll(keepingCapacity:true);differences.removeAll(keepingCapacity:true)
+            return result
+        }
+        if useFilm{resetFilm()}
+        guard output.fps<incoming.fps-0.01 else{return retimed(sample,pts:pts,rate:incoming).map{[$0]} ?? []}
+        guard let selected=selector.select(timestamp:pts,rate:output,sourceRate:incoming) else{return []}
+        return retimed(sample,pts:selected,rate:output).map{[$0]} ?? []
+    }
+    private func resetFilm(){held.removeAll(keepingCapacity:true);differences.removeAll(keepingCapacity:true);previousPixels.removeAll(keepingCapacity:true);phase=FilmCadencePhase();anchor=nil;lastInput=nil}
+    private func fingerprint(_ sample:CMSampleBuffer)->[Int]? {
+        guard let image=CMSampleBufferGetImageBuffer(sample),CVPixelBufferGetPlaneCount(image)>0 else{return nil}
+        let format=CVPixelBufferGetPixelFormatType(image)
+        let tenBit=format==kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange || format==kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
+        guard tenBit || format==kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange || format==kCVPixelFormatType_420YpCbCr8BiPlanarFullRange else{return nil}
+        guard CVPixelBufferLockBaseAddress(image,.readOnly)==kCVReturnSuccess else{return nil}
+        defer{CVPixelBufferUnlockBaseAddress(image,.readOnly)}
+        guard let base=CVPixelBufferGetBaseAddressOfPlane(image,0) else{return nil}
+        let width=CVPixelBufferGetWidthOfPlane(image,0),height=CVPixelBufferGetHeightOfPlane(image,0),stride=CVPixelBufferGetBytesPerRowOfPlane(image,0)
+        guard width>0,height>0 else{return nil}
+        var pixels=[Int]();pixels.reserveCapacity(2304)
+        for y in 0..<36 {for x in 0..<64 {
+            let offset=(y*height/36)*stride+(x*width/64)*(tenBit ? 2:1)
+            pixels.append(tenBit ? Int(base.load(fromByteOffset:offset,as:UInt16.self)>>8):Int(base.load(fromByteOffset:offset,as:UInt8.self)))
+        }}
+        return pixels
+    }
+    private func retimed(_ sample:CMSampleBuffer,pts:Int64,rate:VideoRate)->CMSampleBuffer? {
+        guard lastOutput==nil || pts>lastOutput! else{return nil}
+        var timing=CMSampleTimingInfo(duration:rate.duration,presentationTimeStamp:CMTime(value:pts,timescale:1_000_000),decodeTimeStamp:.invalid)
+        var result:CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(allocator:kCFAllocatorDefault,sampleBuffer:sample,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleBufferOut:&result)==noErr else{return nil}
+        lastOutput=pts;return result
+    }
+}
+
 final class MovieRecorder {
     private var writer:AVAssetWriter?
     private var video:AVAssetWriterInput?,audio:AVAssetWriterInput?

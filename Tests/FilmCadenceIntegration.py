@@ -7,30 +7,34 @@ def run(cmd,**kw):return sp.run(cmd,check=True,capture_output=True,**kw)
 with tempfile.TemporaryDirectory(prefix='elgato-film-cadence-') as temp:
  root=pathlib.Path(temp)
  # Each original picture has a distinct luma value; repeated carriers are exact copies.
- for phase,ten in [(i,False) for i in range(5)]+[(2,True)]:
-  source=root/f'source{phase}-{ten}.mkv';out=root/f'output{phase}-{ten}.mkv'
+ for phase,ten,jitter in [(i,False,False) for i in range(5)]+[(2,True,False),(2,False,True)]:
+  source=root/f'source{phase}-{ten}-{jitter}.mkv';out=root/f'output{phase}-{ten}-{jitter}.mkv'
   ids=[(i+phase)*2//5 for i in range(300)]
   raw=b''.join(bytes([16+id%200])*64*48+bytes([128])*(64*48//2) for id in ids)
   source_encoder=['-c:v','libx265','-pix_fmt','yuv420p10le','-x265-params','lossless=1:bframes=0:keyint=60:pools=1'] if ten else ['-c:v','libx264','-crf','0','-g','60','-bf','0']
   run(['ffmpeg','-v','error','-f','rawvideo','-pix_fmt','yuv420p','-s','64x48','-r','60000/1001','-i','-',*source_encoder,'-preset','ultrafast',str(source)],input=raw)
   info=json.loads(run(['ffprobe','-v','error','-show_streams','-show_packets','-show_data','-of','json',str(source)]).stdout)
   items=[(round(float(p['pts_time'])*1e6),1,unhex(p['data'])) for p in info['packets']]
+  if jitter:
+   times=json.loads((pathlib.Path(__file__).parent/'Fixtures/film-carrier-timestamps.json').read_text())
+   items=[(times[i],t,b) for i,(_,t,b) in enumerate(items)]
   pcm=struct.pack('<hh',1234,-4321)*240240
   items += [(round(i/48000*1e6),2,pcm[i*4:(i+1024)*4]) for i in range(0,240240,1024)]
   payload=msg(0,0,unhex(info['streams'][0]['extradata']))+b''.join(msg(t,pts,b) for pts,t,b in sorted(items))+msg(3,0)
   result=sp.run([helper,'hevc='+str(int(ten)),'output='+str(out),'video=libx264','audio=pcm_s16le','encoder=2','decoder=2','sourceN=60000','sourceD=1001','fpsN=24000','fpsD=1001','cadence=film32','rc=crf','quality=0','preset=ultrafast'],input=payload,capture_output=True)
   assert result.returncode==0,result.stderr.decode()
+  if jitter:assert b'Video timing changed' not in result.stdout, 'Ordinary short device intervals caused false carrier recovery'
   pixels=run(['ffmpeg','-v','error','-i',str(out),'-pix_fmt','yuv420p','-fps_mode','passthrough','-f','rawvideo','-']).stdout
   actual=[pixels[i]-16 for i in range(0,len(pixels),64*48*3//2)]
   # The first partial picture may be omitted, but no complete picture may repeat or disappear.
   steps=[b-a for a,b in zip(actual,actual[1:])]
   assert len(actual)==120,(phase,len(actual))
   assert all(x==1 for x in steps),(phase,'repeated/skipped original pictures',[(i+1,x) for i,x in enumerate(steps) if x!=1][:20])
-  print('PASS 3:2 phase',phase,'HEVC10' if ten else 'H264','120 frames; no repeats or missing pictures including startup',flush=True)
+  print('PASS 3:2 phase',phase,'HEVC10' if ten else 'H264','120 frames; no repeats or missing pictures including startup'+(' with real device timing jitter' if jitter else ''),flush=True)
 
   got=run(['ffmpeg','-v','error','-i',str(out),'-map','0:a','-f','s16le','-']).stdout
   assert got==pcm,(phase,'audio changed')
-  if phase==2 and not ten:
+  if phase==2 and not ten and not jitter:
    split_args=[helper,'output='+str(root/'split.mkv'),'video=libx264','audio=pcm_s16le','decoder=2','encoder=2','sourceN=60000','sourceD=1001','fpsN=24000','fpsD=1001','cadence=film32','split=1','splitValue=1','rc=crf','quality=0','preset=ultrafast']
    split=run(split_args,input=payload)
    parts=sorted(root.glob('split_part*.mkv'));assert len(parts)>=4,parts

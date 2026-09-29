@@ -84,8 +84,9 @@ frame cadence; it cannot create intermediate motion that was never captured. Res
 
 The incoming rate is measured over a short timestamp window to tolerate the
 device's timing jitter. The status shows **Incoming** and **Output** FPS instead
-of a hard-coded 60. A substantial sustained incoming-rate change stops an active
-recording so its timing metadata remains consistent; start a new recording.
+of a hard-coded 60. Changes in the estimated incoming rate warn and continue recording using source
+timestamps and the existing output encoder configuration. A real codec, resolution
+or HDR-format change still requires a new recording.
 
 Physical HDMI input timing is not exposed by a verified USB status field in this
 implementation. If the device repeats a 30 fps HDMI source into a 60 fps encoded
@@ -102,13 +103,14 @@ repeat pattern and keeps each original picture once after cadence acquisition.
 This avoids the repeating skips caused by blindly sampling the carrier at 25 fps.
 The recovered timeline follows device timestamps so audio does not drift.
 
-This recovery applies to **recordings**, requires the source-content choice to
-match the effective output rate, and adds up to five carrier frames of analysis
+This recovery applies to **recording, preview and NDI**, requires the source-content
+choice to match the effective output rate, and adds up to five carrier frames of analysis
 buffering. It is intended for stable progressive 3:2 repeats, not interlaced
 telecine or motion interpolation. Static pictures can make the phase ambiguous;
 clear motion establishes it. Missing input pictures cannot be reconstructed.
-Preview and NDI retain their ordinary FPS cap. Use Automatic for actual 60 fps
-motion and when the content cadence is unknown.
+Interrupted carrier timing falls back to ordinary timestamp-based FPS selection
+and reacquires film cadence after stable input returns. Use Automatic for actual
+60 fps motion and when the content cadence is unknown.
 
 **Original device stream** preserves every compressed frame. If the effective
 output rate is lower, recording reports that a video encoder is required; choose

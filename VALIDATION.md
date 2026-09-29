@@ -1,10 +1,8 @@
 # Validation
 
-Current release: **0.6.6** adds the visible version/build label. Both architecture
-bundles passed signature and dependency checks; the installed ARM app was visually
-verified. Recording behavior is unchanged from 0.6.5.
+Current release: [0.6.7 recording-rate recovery and film preview](docs/VALIDATION-0.6.7.md).
 
-Latest recording validation: [0.6.5 audio clock recovery validation](docs/VALIDATION-0.6.5.md).
+Previous: [0.6.5 audio clock recovery validation](docs/VALIDATION-0.6.5.md).
 
 Previous: [0.6.4 preview restore validation](docs/VALIDATION-0.6.4.md).
 

@@ -40,6 +40,8 @@ class Recorder {
  AVRational sourceRate={0,1},outputRate={0,1};int64_t selectionOrigin=AV_NOPTS_VALUE,lastSlot=-1;
  FilmCadence filmCadence;FilmTimeline filmTimeline;std::vector<AVFrame*> filmFrames;std::array<double,5> filmDifferences{NAN,NAN,NAN,NAN,NAN};
  std::vector<uint8_t> filmPrevious;int64_t filmOrigin=AV_NOPTS_VALUE,filmLastPTS=AV_NOPTS_VALUE;
+ std::deque<double> carrierIntervals;bool filmCarrierValid=true,videoTimingWarning=false;
+ int64_t lastWrittenVideoPTS=AV_NOPTS_VALUE;
  bool filmKey=false,trailerAttempted=false;
  int recoveryCount=0;bool softClockWarning=false;
  int width=0,height=0; string output; bool copy; int64_t segmentStart=0,segmentPayloadBytes=0; bool splitPending=false,splitReady=false;
@@ -168,15 +170,34 @@ class Recorder {
  void videoFrame(AVFrame*src,int64_t pts,bool key,AVPacket*input,bool filmSelected=false){
   configureRate();
   if(recoverFilm() && !filmSelected){
-   if(filmOrigin==AV_NOPTS_VALUE){if(!key)return;filmOrigin=pts;}
-   if(filmLastPTS!=AV_NOPTS_VALUE && pts-filmLastPTS>av_rescale_q(1,av_inv_q(sourceRate),US)*1.6){emitFilm();filmOrigin=pts;filmTimeline=FilmTimeline();filmCadence=FilmCadence();filmPrevious.clear();}
+   // A real carrier-rate change is recoverable. Do not interpret every 30 Hz
+   // frame as a separate partial 3:2 cycle and accidentally exceed the FPS cap.
+   bool valid=filmCarrierValid;
+   if(filmLastPTS!=AV_NOPTS_VALUE){
+    double period=1e6/av_q2d(sourceRate),delta=double(pts-filmLastPTS);
+    // Legitimate short ~10 ms intervals are paired with longer intervals.
+    // Detect faster rates from the window mean, never a single short interval.
+    if(delta<=0 || delta>period*1.6){carrierIntervals.clear();valid=false;}
+    else{
+     carrierIntervals.push_back(delta);if(carrierIntervals.size()>30)carrierIntervals.pop_front();
+     if(carrierIntervals.size()==30){double sum=0;for(auto x:carrierIntervals)sum+=x;valid=std::abs(sum/30/period-1)<0.08;}
+    }
+   }
+   if(valid!=filmCarrierValid){
+    emitFilm();filmOrigin=AV_NOPTS_VALUE;filmTimeline=FilmTimeline();filmCadence=FilmCadence();filmPrevious.clear();
+    filmCarrierValid=valid;
+    warning(valid?"Film carrier timing restored; cadence recovery resumed":"Video timing changed; continued with timestamp-based FPS conversion");
+   }
    filmLastPTS=pts;
+   if(filmCarrierValid){
+   if(filmOrigin==AV_NOPTS_VALUE){if(!key && !started)return;filmOrigin=pts;}
    AVFrame*held=av_frame_alloc();if(!held)throw runtime_error("Allocate film cadence frame");
    filmFrames.push_back(held);
    if(src->format==AV_PIX_FMT_VIDEOTOOLBOX){ck(av_hwframe_transfer_data(held,src,0),"Read film cadence frame");av_frame_copy_props(held,src);}
    else ck(av_frame_ref(held,src),"Retain film cadence frame");
    held->pts=pts;filmDifferences[filmFrames.size()-1]=filmDifference(held);filmKey=filmKey||key;
    if(filmFrames.size()==5)emitFilm();return;
+   }
   }
   if(started&&num("split")){
    int64_t bytes=max(avio_tell(out->pb),segmentPayloadBytes);
@@ -192,6 +213,10 @@ class Recorder {
    if(slot<=lastSlot){flushAudioUntil(pts);return;}
    lastSlot=slot;pts=selectionOrigin+av_rescale_q(slot,av_inv_q(outputRate),US);
   }
+  if(!copy && lastWrittenVideoPTS!=AV_NOPTS_VALUE && pts<=lastWrittenVideoPTS){
+   if(!videoTimingWarning){videoTimingWarning=true;warning("Skipped an overlapping video timestamp during timing recovery");}
+   return;
+  }
   AVFrame*cpu=nullptr;if(!copy && src->format==AV_PIX_FMT_VIDEOTOOLBOX){cpu=av_frame_alloc();ck(av_hwframe_transfer_data(cpu,src,0),"Download decoded frame");av_frame_copy_props(cpu,src);src=cpu;}
   if(width && (src->width!=width||src->height!=height))throw runtime_error("HDMI format changed; start a new recording");width=src->width;height=src->height;
   if(splitReady){flushAudioUntil(pts);finishSegment();splitPending=false;splitReady=false;key=true;}
@@ -202,7 +227,7 @@ class Recorder {
    scaler=sws_getCachedContext(scaler,src->width,src->height,(AVPixelFormat)src->format,ve->width,ve->height,ve->pix_fmt,flags,nullptr,nullptr,nullptr);if(!scaler)throw runtime_error("Scaler unavailable");
    AVFrame*dst=av_frame_alloc();dst->format=ve->pix_fmt;dst->width=ve->width;dst->height=ve->height;ck(av_frame_get_buffer(dst,32),"Allocate video frame");sws_scale(scaler,src->data,src->linesize,0,src->height,dst->data,dst->linesize);av_frame_copy_props(dst,src);dst->pts=av_rescale_q(pts-origin,US,ve->time_base);dst->pict_type=AV_PICTURE_TYPE_NONE;
    ck(avcodec_send_frame(ve,dst),"Encode video");av_frame_free(&dst);packet(ve,vs);
-  }av_frame_free(&cpu);
+  }lastWrittenVideoPTS=pts;av_frame_free(&cpu);
  }
  void receiveFrames(){AVFrame*f=av_frame_alloc();int r;while((r=avcodec_receive_frame(dec,f))>=0){auto it=pending.find(f->pts);if(it==pending.end())throw runtime_error("Decoded timestamp has no source packet");videoFrame(f,f->pts,(f->flags&AV_FRAME_FLAG_KEY)!=0,it->second);av_packet_free(&it->second);pending.erase(it);av_frame_unref(f);}av_frame_free(&f);if(r!=AVERROR(EAGAIN)&&r!=AVERROR_EOF)ck(r,"Read decoded frame");}
 public:

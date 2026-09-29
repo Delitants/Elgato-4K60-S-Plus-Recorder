@@ -102,3 +102,37 @@ struct PreviewPresentationClock {
         return Presentation(time:deadline,reset:restart)
     }
 }
+
+/// Same five-carrier/two-picture phase detector used by the recording helper.
+/// Static scenes retain the last confident phase; no intermediate pictures are made.
+struct FilmCadencePhase {
+    private var history=Array(repeating:[Double](),count:5),phase=0
+    mutating func select(_ differences:[Double])->[Int] {
+        var medians=Array(repeating:Double.nan,count:5)
+        for i in 0..<5 {
+            if differences[i].isFinite{history[i].append(differences[i])}
+            if history[i].count>6{history[i].removeFirst()}
+            if !history[i].isEmpty{let sorted=history[i].sorted();medians[i]=sorted[sorted.count/2]}
+        }
+        func detect(_ values:[Double])->Int? {
+            var best=0.0,candidate:Int?
+            for p in 0..<5 {
+                let q=(p+2)%5;var low=0.0,high=Double.infinity
+                for i in 0..<5 where values[i].isFinite {
+                    if i==p || i==q{high=min(high,values[i])}else{low=max(low,values[i])}
+                }
+                if high.isFinite && high>max(0.15,low*4) && high/(low+0.05)>best{candidate=p;best=high/(low+0.05)}
+            }
+            return candidate
+        }
+        var interior=differences;interior[0] = .nan
+        if let candidate=detect(differences) ?? detect(interior) ?? detect(medians){phase=candidate}
+        else {
+            for p in 1..<5 {
+                let low=(0..<5).filter{$0 != p && differences[$0].isFinite}.map{differences[$0]}.max() ?? 0
+                if differences[p]>max(0.15,low*4){return [0,p]}
+            }
+        }
+        return [phase,(phase+2)%5].sorted()
+    }
+}

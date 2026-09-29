@@ -1,9 +1,10 @@
 import Foundation
 import CoreMedia
 final class RecordingSink {
- private let queue=DispatchQueue(label:"Elgato.Recording",qos:.userInitiated),lock=NSLock(),budget=QueueBudget()
+ private let queue=DispatchQueue(label:"Elgato.Recording",qos:.userInitiated),lock=NSLock(),budget:QueueBudget
  private let converter:MediaConverter,decoder=PreviewDecoder(),native:MovieRecorder?,helper:MediaHelperClient?
  private var recordingRate:VideoRate?
+ private var timingWarning:String?
  private var recordingActivity:NSObjectProtocol?
  private var failure:Error?,ended=false,frames=0,elapsed=0.0,origin:UInt64?
  private var acceptedAt:Double?,fileSize:Int64=0,refreshPending=false
@@ -14,10 +15,15 @@ final class RecordingSink {
  var duration:Double{lock.lock();defer{lock.unlock()};return elapsed}
  var videoFrames:Int{lock.lock();defer{lock.unlock()};return frames}
  var dropped:Int{0}
- var warning:String?{helper?.warning}
+ var warning:String?{
+  lock.lock();let timing=timingWarning;lock.unlock()
+  let messages=[timing,helper?.warning].compactMap{$0}
+  return messages.isEmpty ? nil:messages.joined(separator:" · ")
+ }
  var error:Error?{lock.lock();defer{lock.unlock()};return failure}
  private let profile:RecordingProfile
  init(url:URL,profile:RecordingProfile,initialRate:VideoRate?=nil){self.url=url;self.profile=profile;converter=MediaConverter(hevc:profile.captureHEVC,initialRate:initialRate);decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC
+  budget=QueueBudget(startupGrace:profile.usesHelper ? 10_000_000:0)
   native=profile.usesHelper ? nil:MovieRecorder(url:url,profile:profile);helper=profile.usesHelper ? MediaHelperClient(url:url,profile:profile):nil
   do{
    try profile.validateRecording()
@@ -47,7 +53,13 @@ final class RecordingSink {
    do {
     guard self.error==nil,let(sample,key)=try self.converter.convert(frame) else{return}
     if frame.type==0xc1,let rate=self.converter.frameTiming.rate {
-     if let previous=self.recordingRate,abs(previous.fps-rate.fps)/previous.fps>0.01 {throw RecorderError(message:"Incoming frame rate changed. Start a new recording for the new signal.")}
+     if let previous=self.recordingRate,abs(previous.fps-rate.fps)/previous.fps>0.01 {
+      // FPS is a rolling estimate, not a codec-format change. Keep the existing
+      // encoder/output configuration and source PTS instead of aborting the file.
+      self.lock.lock()
+      if self.timingWarning==nil{self.timingWarning="Incoming timing varied (\(previous.label) → \(rate.label) fps); recording continued using source timestamps"}
+      self.lock.unlock()
+     }
      if self.recordingRate==nil && key {self.recordingRate=rate}
     }
     if let helper=self.helper {guard try helper.append(sample,type:frame.type,key:key) else{return}}

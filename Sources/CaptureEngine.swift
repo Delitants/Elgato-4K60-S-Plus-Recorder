@@ -95,28 +95,21 @@ final class CaptureEngine {
         if profile.ndiEnabled{do{ndi=try NDIOutput(profile:profile)}catch{change{$0.ndiStatus=error.localizedDescription}}}
         let ndiOutput=ndi
         let decoder=PreviewDecoder();decoder.preference=profile.decoder;decoder.tenBit=profile.captureHEVC
-        var previewSelector=FrameSelector()
+        let previewSelector=PreviewSampleSelector()
         decoder.onFrame={ [weak self] sample in
             guard let self,let incoming=VideoRate.measured(period:CMSampleBufferGetDuration(sample).seconds) else{return}
             let effective=profile.effectiveRate(incoming:incoming)
-            var output=sample
+            let film=(profile.sourceFPS == .fps23976 || profile.sourceFPS == .fps24) && effective==profile.sourceFPS.rate
             self.lock.lock()
-            if effective.fps<incoming.fps-0.01 {
-                let pts=CMTimeConvertScale(CMSampleBufferGetPresentationTimeStamp(sample),timescale:1_000_000,method:.default).value
-                guard let selected=previewSelector.select(timestamp:pts,rate:effective,sourceRate:incoming) else{self.lock.unlock();return}
-                var timing=CMSampleTimingInfo(duration:effective.duration,presentationTimeStamp:CMTime(value:selected,timescale:1_000_000),decodeTimeStamp:.invalid)
-                var adjusted:CMSampleBuffer?
-                if CMSampleBufferCreateCopyWithNewTiming(allocator:kCFAllocatorDefault,sampleBuffer:sample,sampleTimingEntryCount:1,sampleTimingArray:&timing,sampleBufferOut:&adjusted)==noErr,let adjusted{output=adjusted}
-                else{self.lock.unlock();return}
-            }
-            if self.videoPreview {
+            let outputs=previewSelector.select(sample,incoming:incoming,output:effective,film:film)
+            for output in outputs where self.videoPreview {
                 #if PREVIEW_DIAGNOSTICS
                 PreviewTrace.shared.event(3,CMSampleBufferGetPresentationTimeStamp(output).seconds,0)
                 #endif
                 self.previewFrames.append(output,pts:CMSampleBufferGetPresentationTimeStamp(output).seconds)
             }
             self.lock.unlock()
-            ndiOutput?.offerVideo(output)
+            for output in outputs{ndiOutput?.offerVideo(output)}
         }
         let monitor=AudioMonitor()
         let timing=CaptureTiming()

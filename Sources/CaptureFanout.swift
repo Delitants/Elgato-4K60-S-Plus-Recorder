@@ -60,18 +60,23 @@ final class RecordingFileBytes {
 }
 // Includes the item being processed: a blocked pipe cannot hide outside this budget.
 final class QueueBudget {
- private let lock=NSLock(), maxBytes:Int, maxAge:UInt64
+ private let lock=NSLock(), maxBytes:Int, maxAge:UInt64, startupGrace:UInt64
  private let clock:()->UInt64
  private var entries:[(Int,UInt64)]=[]
  private var used=0
- init(maxBytes:Int=64*1024*1024,maxAge:UInt64=2_000_000,clock:@escaping()->UInt64={DispatchTime.now().uptimeNanoseconds/1000}){self.maxBytes=maxBytes;self.maxAge=maxAge;self.clock=clock}
+ private var firstOffer:UInt64?
+ init(maxBytes:Int=64*1024*1024,maxAge:UInt64=2_000_000,startupGrace:UInt64=0,clock:@escaping()->UInt64={DispatchTime.now().uptimeNanoseconds/1000}){self.maxBytes=maxBytes;self.maxAge=maxAge;self.startupGrace=startupGrace;self.clock=clock}
  var bytes:Int{lock.lock();defer{lock.unlock()};return used}
  func reserve(bytes:Int)->Bool{
   lock.lock();defer{lock.unlock()}
   guard bytes>=0,bytes<=maxBytes-used else{return false}
   // Media PTS can interleave and jump; only monotonic residence time measures backlog.
   let now=clock()
-  if let first=entries.first,now>=first.1,now-first.1>maxAge{return false}
+  if firstOffer==nil{firstOffer=now}
+  // Permit cold helper startup once, while retaining the hard byte bound.
+  // Draining the queue must never renew the startup allowance.
+  let starting=now>=firstOffer! && now-firstOffer!<startupGrace
+  if !starting,let first=entries.first,now>=first.1,now-first.1>maxAge{return false}
   used+=bytes;entries.append((bytes,now));return true
  }
  func release(bytes:Int){lock.lock();defer{lock.unlock()};precondition(entries.first?.0==bytes);used-=bytes;entries.removeFirst()}
