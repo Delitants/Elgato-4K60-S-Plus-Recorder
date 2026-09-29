@@ -108,10 +108,26 @@ recording so its timing metadata remains consistent; start a new recording.
 
 Physical HDMI input timing is not exposed by a verified USB status field in this
 implementation. If the device repeats a 30 fps HDMI source into a 60 fps encoded
-stream, set **Capture → Source cadence cap → 30 fps**. This caps processing at
+stream, set **Capture → Source content cadence / cap → 30 fps**. This caps processing at
 the rate you specify; it does not change or verify the device's HDMI input mode.
 **Incoming** remains the measured device stream rate; **Output** reflects the cap.
 A game rendering 30 fps over a 60 Hz HDMI signal still supplies a 60 Hz signal.
+
+For **23.976 fps film carried as repeated pictures in a 59.94 fps stream**, set
+**Capture → Source content cadence / cap → 23.976 fps**, and leave **Video →
+Output FPS → Match incoming stream** (or choose 23.976). For 24-in-60 film, use
+24 fps. With a video encoder selected, recording detects the progressive 3:2
+repeat pattern and keeps each original picture once after cadence acquisition.
+This avoids the repeating skips caused by blindly sampling the carrier at 25 fps.
+The recovered timeline follows device timestamps so audio does not drift.
+
+This recovery applies to **recordings**, requires the source-content choice to
+match the effective output rate, and adds up to five carrier frames of analysis
+buffering. It is intended for stable progressive 3:2 repeats, not interlaced
+telecine or motion interpolation. Static pictures can make the phase ambiguous;
+clear motion establishes it. Missing input pictures cannot be reconstructed.
+Preview and NDI retain their ordinary FPS cap. Use Automatic for actual 60 fps
+motion and when the content cadence is unknown.
 
 **Original device stream** preserves every compressed frame. If the effective
 output rate is lower, recording reports that a video encoder is required; choose
@@ -267,4 +283,4 @@ remain visible so the app can explain an incompatible selection.
 
 See [BUILD.md](BUILD.md#output-combination-audit) for the output-matrix runner.
 
-[0.6.1 validation](docs/VALIDATION-0.6.1.md) · [0.6.0 validation](docs/VALIDATION-0.6.0.md) · [0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)
+[0.6.2 validation](docs/VALIDATION-0.6.2.md) · [0.6.1 validation](docs/VALIDATION-0.6.1.md) · [0.6.0 validation](docs/VALIDATION-0.6.0.md) · [0.5.1 validation](docs/VALIDATION-0.5.1.md) · [0.5.0 validation](docs/VALIDATION-0.5.0.md) · [0.4.1 output test report](OUTPUT-TEST-REPORT.md) · [Detailed matrix results](OUTPUT-TEST-RESULTS.json)

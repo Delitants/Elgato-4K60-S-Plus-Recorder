@@ -3,6 +3,7 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/opt.h>
+#include <libavutil/pixdesc.h>
 #include <libavutil/audio_fifo.h>
 #include <libavutil/hwcontext.h>
 #include <libswscale/swscale.h>
@@ -18,6 +19,7 @@ extern "C" {
 #include <filesystem>
 #include <algorithm>
 #include <unistd.h>
+#include "FilmCadence.h"
 using namespace std;
 static const AVRational US={1,1000000};
 static void ck(int r,const char*what){if(r<0){char e[256];av_strerror(r,e,sizeof(e));throw runtime_error(string(what)+": "+e);}}
@@ -36,6 +38,9 @@ class Recorder {
  AVStream *vs=nullptr,*as=nullptr; SwsContext*scaler=nullptr; SwrContext*resampler=nullptr;AVAudioFifo*fifo=nullptr;
  AVBufferRef*hw=nullptr;vector<uint8_t>extra; map<int64_t,AVPacket*> pending; int part=0;int64_t origin=0,audioNext=AV_NOPTS_VALUE,lastV=-1,lastA=-1;bool started=false;
  AVRational sourceRate={0,1},outputRate={0,1};int64_t selectionOrigin=AV_NOPTS_VALUE,lastSlot=-1;
+ FilmCadence filmCadence;FilmTimeline filmTimeline;std::vector<AVFrame*> filmFrames;std::array<double,5> filmDifferences{NAN,NAN,NAN,NAN,NAN};
+ std::vector<uint8_t> filmPrevious;int64_t filmOrigin=AV_NOPTS_VALUE,filmLastPTS=AV_NOPTS_VALUE;
+ bool filmKey=false;
  int width=0,height=0; string output; bool copy; int64_t segmentStart=0,segmentPayloadBytes=0; bool splitPending=false,splitReady=false;
  static AVPixelFormat hardwareFormat(AVCodecContext*c,const AVPixelFormat*fmts){for(auto p=fmts;*p!=AV_PIX_FMT_NONE;++p)if(*p==AV_PIX_FMT_VIDEOTOOLBOX)return *p;return num("decoder")==1?AV_PIX_FMT_NONE:fmts[0];}
  void packet(AVCodecContext*c,AVStream*s){AVPacket*p=av_packet_alloc();while(true){int r=avcodec_receive_packet(c,p);if(r==AVERROR(EAGAIN)||r==AVERROR_EOF)break;ck(r,"Receive encoded packet");av_packet_rescale_ts(p,c->time_base,s->time_base);p->stream_index=s->index;segmentPayloadBytes+=p->size;ck(av_interleaved_write_frame(out,p),"Write packet");}av_packet_free(&p);}
@@ -109,14 +114,50 @@ class Recorder {
   }
  }
  void finishSegment(){if(!out)return;if(ve){ck(avcodec_send_frame(ve,nullptr),"Drain video");packet(ve,vs);}audioFrames(true);if(ae){ck(avcodec_send_frame(ae,nullptr),"Drain audio");packet(ae,as);}ck(av_write_trailer(out),"Finalize container");avio_closep(&out->pb);avformat_free_context(out);out=nullptr;avcodec_free_context(&ve);avcodec_free_context(&ae);swr_free(&resampler);av_audio_fifo_free(fifo);fifo=nullptr;started=false;cout<<"SAVED "<<output<<endl;}
- void videoFrame(AVFrame*src,int64_t pts,bool key,AVPacket*input){
+ bool recoverFilm()const{return !copy && opt("cadence")=="film32" && std::abs(av_q2d(sourceRate)/av_q2d(outputRate)-2.5)<0.015;}
+ double filmDifference(AVFrame*f){
+  std::vector<uint8_t> pixels;pixels.reserve(2304);
+  const AVPixFmtDescriptor*desc=av_pix_fmt_desc_get((AVPixelFormat)f->format);
+  if(!desc || !(desc->flags&AV_PIX_FMT_FLAG_PLANAR) || (desc->flags&AV_PIX_FMT_FLAG_RGB))throw runtime_error("Unsupported pixel format for film cadence recovery");
+  int depth=desc->comp[0].depth,shift=desc->comp[0].shift;
+  for(int y=0;y<36;y++)for(int x=0;x<64;x++){
+   const uint8_t*p=f->data[0]+(y*f->height/36)*f->linesize[0]+(x*f->width/64)*(depth>8?2:1);
+   unsigned value=depth>8 ? unsigned(p[0])|(unsigned(p[1])<<8):p[0];
+   pixels.push_back(uint8_t((value>>shift)>>(std::max(8,depth)-8)));
+  }
+  double difference=filmPrevious.empty()?NAN:0;if(filmPrevious.size()==pixels.size())for(size_t i=0;i<pixels.size();i++)difference+=std::abs(int(pixels[i])-int(filmPrevious[i]));
+  filmPrevious=std::move(pixels);return difference/2304;
+ }
+ void emitFilm(){
+  if(filmFrames.empty())return;
+  auto selected=filmCadence.observe(filmDifferences);
+  int64_t cyclePTS=filmTimeline.cycle(filmFrames.front()->pts,1e6/av_q2d(outputRate));int picture=0;
+  // A final partial cycle ends at its available picture; never invent a full cycle.
+  for(int index:selected){if(index>=int(filmFrames.size()))continue;
+   AVFrame*f=filmFrames[index];int64_t pts=cyclePTS+av_rescale_q(picture++,av_inv_q(outputRate),US);
+   videoFrame(f,pts,filmKey||!started,nullptr,true);filmKey=false;
+  }
+  for(auto*f:filmFrames)av_frame_free(&f);filmFrames.clear();filmDifferences.fill(NAN);
+ }
+ void videoFrame(AVFrame*src,int64_t pts,bool key,AVPacket*input,bool filmSelected=false){
   configureRate();
+  if(recoverFilm() && !filmSelected){
+   if(filmOrigin==AV_NOPTS_VALUE){if(!key)return;filmOrigin=pts;}
+   if(filmLastPTS!=AV_NOPTS_VALUE && pts-filmLastPTS>av_rescale_q(1,av_inv_q(sourceRate),US)*1.6){emitFilm();filmOrigin=pts;filmTimeline=FilmTimeline();filmCadence=FilmCadence();filmPrevious.clear();}
+   filmLastPTS=pts;
+   AVFrame*held=av_frame_alloc();if(!held)throw runtime_error("Allocate film cadence frame");
+   filmFrames.push_back(held);
+   if(src->format==AV_PIX_FMT_VIDEOTOOLBOX){ck(av_hwframe_transfer_data(held,src,0),"Read film cadence frame");av_frame_copy_props(held,src);}
+   else ck(av_frame_ref(held,src),"Retain film cadence frame");
+   held->pts=pts;filmDifferences[filmFrames.size()-1]=filmDifference(held);filmKey=filmKey||key;
+   if(filmFrames.size()==5)emitFilm();return;
+  }
   if(started&&num("split")){
    int64_t bytes=max(avio_tell(out->pb),segmentPayloadBytes);
    if((num("split")==1&&pts-segmentStart>=int64_t(num("splitValue"))*1000000)||(num("split")==2&&bytes>=int64_t(num("splitValue"))*1000000))splitPending=true;
    if(splitPending&&key)splitReady=true;
   }
-  if(!copy){
+  if(!copy && !filmSelected){
    if(selectionOrigin==AV_NOPTS_VALUE)selectionOrigin=pts;
    // Device PTS has sub-frame jitter. First recover the source frame position;
    // otherwise 60→30 may select frames 0,3,4,7 instead of 0,2,4,6.
@@ -149,7 +190,7 @@ public:
   }
   if(opt("video")=="h264_videotoolbox" && num("bframes")>0)throw runtime_error("Hardware H.264 B-frames are unavailable: disable B-frames or choose software encoding");
  }
- ~Recorder(){for(auto &entry:pending)av_packet_free(&entry.second);if(out){if(out->pb)avio_closep(&out->pb);avformat_free_context(out);}avcodec_free_context(&ve);avcodec_free_context(&ae);avcodec_free_context(&dec);av_buffer_unref(&hw);sws_freeContext(scaler);swr_free(&resampler);if(fifo)av_audio_fifo_free(fifo);}
+ ~Recorder(){for(auto*f:filmFrames)av_frame_free(&f);for(auto &entry:pending)av_packet_free(&entry.second);if(out){if(out->pb)avio_closep(&out->pb);avformat_free_context(out);}avcodec_free_context(&ve);avcodec_free_context(&ae);avcodec_free_context(&dec);av_buffer_unref(&hw);sws_freeContext(scaler);swr_free(&resampler);if(fifo)av_audio_fifo_free(fifo);}
  void setup(vector<uint8_t>e){if(dec||e.empty())throw runtime_error("Invalid or repeated setup");extra=move(e);auto c=avcodec_find_decoder(num("hevc")?AV_CODEC_ID_HEVC:AV_CODEC_ID_H264);dec=avcodec_alloc_context3(c);dec->pkt_timebase=US;dec->extradata=(uint8_t*)av_mallocz(extra.size()+AV_INPUT_BUFFER_PADDING_SIZE);memcpy(dec->extradata,extra.data(),extra.size());dec->extradata_size=int(extra.size());dec->thread_count=1;dec->flags|=AV_CODEC_FLAG_LOW_DELAY;
   if(num("decoder")!=2){int r=av_hwdevice_ctx_create(&hw,AV_HWDEVICE_TYPE_VIDEOTOOLBOX,nullptr,nullptr,0);if(r>=0){dec->hw_device_ctx=av_buffer_ref(hw);dec->get_format=hardwareFormat;}else if(num("decoder")==1)ck(r,"Required hardware decoder");}
   ck(avcodec_open2(dec,c,nullptr),"Open source decoder");}
@@ -161,6 +202,6 @@ public:
    audioPendingBytes+=m.data.size();if(audioPendingBytes>48000*4*3)throw runtime_error("Video stalled; audio holdback exceeded three seconds");
    audioPending.push_back({m.pts,move(m.data),0});
   }}
- void finish(){if(dec){ck(avcodec_send_packet(dec,nullptr),"Flush source decoder");receiveFrames();}if(!started)throw runtime_error("No video keyframe arrived");flushAudioUntil(INT64_MAX);finishSegment();}
+ void finish(){if(dec){ck(avcodec_send_packet(dec,nullptr),"Flush source decoder");receiveFrames();}emitFilm();if(!started)throw runtime_error("No video keyframe arrived");flushAudioUntil(INT64_MAX);finishSegment();}
 };
 int main(int argc,char**argv){ios::sync_with_stdio(false);cin.tie(nullptr);av_log_set_level(AV_LOG_ERROR);try{for(int i=1;i<argc;++i){string a=argv[i];auto n=a.find('=');if(n!=string::npos)args[a.substr(0,n)]=a.substr(n+1);}Recorder r;Message m;bool end=false;while(readMessage(m)){if(m.type==3){end=true;break;}r.process(m);}if(!end)throw runtime_error("Helper input ended without finish");r.finish();return 0;}catch(const exception&e){cerr<<"ERROR "<<e.what()<<endl;return 1;}}

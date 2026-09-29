@@ -1,6 +1,6 @@
 # Validation — 2026-09-27
 
-Current update: [0.6.1 preview pacing validation](docs/VALIDATION-0.6.1.md).
+Current update: [0.6.2 recording cadence validation](docs/VALIDATION-0.6.2.md).
 
 Previous: [0.6.0 hardware constant-quality validation](docs/VALIDATION-0.6.0.md).
 Previous: [0.5.1 incoming bitrate and format validation](docs/VALIDATION-0.5.1.md).
