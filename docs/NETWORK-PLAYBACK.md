@@ -16,7 +16,7 @@ If ffmpeg.exe is in the current PowerShell directory, use `.\ffmpeg.exe`. Replac
 
 ## Other useful choices
 
-- MP4 fast start puts its metadata at the beginning for progressive network playback. It is not added by this MKV option. For a recording whose video/audio are compatible with MP4 and the TV, an offline example is `ffmpeg.exe -n -i "input.mkv" -map 0:v:0 -map 0:a:0? -c copy -movflags +faststart "output.mp4"`.
+- MP4 fast start is automatic when MP4 is selected, independently of the MKV option. It puts metadata at the beginning for progressive network playback. For split recordings, parts are optimized after Stop so relocation does not block capture. Allow temporary space for one additional part; the original remains intact until the optimized copy is complete. If optimization fails, the app warns and retains the playable original. MOV and MPEG-TS do not receive this optimization. For a recording whose video/audio are compatible with MP4 and the TV, an offline example is `ffmpeg.exe -n -i "input.mkv" -map 0:v:0 -map 0:a:0? -c copy -movflags +faststart "output.mp4"`.
 - A shorter keyframe interval, such as two seconds, gives the player more seek entry points. This setting already exists under Video when re-encoding. It can increase file size or reduce compression efficiency; stream copy cannot add keyframes.
 - Use codecs supported natively by the specific TV to avoid server transcoding. H.264/AVC 8-bit video and AAC stereo are candidates to test, not a guarantee for an unknown TV model.
 - The DLNA server must support seeking and advertise it correctly. A front index cannot fix missing byte/time seeking or unsupported TV codecs. Compare the same file from USB and DLNA to narrow down the problem.

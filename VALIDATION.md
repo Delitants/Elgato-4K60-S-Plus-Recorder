@@ -1,6 +1,8 @@
 # Validation
 
-Current release: [0.6.10 MKV network playback](docs/VALIDATION-0.6.10.md).
+Current release: [0.6.11 MP4 fast start](docs/VALIDATION-0.6.11.md).
+
+Previous: [0.6.10 MKV network playback](docs/VALIDATION-0.6.10.md).
 
 Previous: [0.6.9 recording backlog recovery and timer controls](docs/VALIDATION-0.6.9.md).
 

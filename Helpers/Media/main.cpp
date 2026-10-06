@@ -19,6 +19,7 @@ extern "C" {
 #include <filesystem>
 #include <algorithm>
 #include <unistd.h>
+extern "C" int mp4_faststart_main(int argc,char **argv);
 #include "FilmCadence.h"
 using namespace std;
 static const AVRational US={1,1000000};
@@ -43,6 +44,7 @@ class Recorder {
  std::deque<double> carrierIntervals;bool filmCarrierValid=true,videoTimingWarning=false;
  int64_t lastWrittenVideoPTS=AV_NOPTS_VALUE;
  bool filmKey=false,trailerAttempted=false;
+ vector<string> mp4Parts;
  bool frontIndex=false;uint64_t indexEntries=0;
  static constexpr int indexReserve=1048576;
  int recoveryCount=0;bool softClockWarning=false;
@@ -106,6 +108,7 @@ class Recorder {
   AVDictionary*ad=nullptr;if(ac=="libopus")av_dict_set(&ad,"vbr",opt("audioMode","on").c_str(),0);ck(avcodec_open2(ae,a,&ad),"Open audio encoder");av_dict_free(&ad);
   as=avformat_new_stream(out,nullptr);as->time_base=ae->time_base;ck(avcodec_parameters_from_context(as->codecpar,ae),"Audio output format");
   AVChannelLayout input=AV_CHANNEL_LAYOUT_STEREO;ck(swr_alloc_set_opts2(&resampler,&ae->ch_layout,ae->sample_fmt,48000,&input,AV_SAMPLE_FMT_S16,48000,0,nullptr),"Audio converter");ck(av_opt_set_double(resampler,"async",48,0),"Audio clock compensation");ck(av_opt_set_double(resampler,"min_comp",0.001,0),"Audio clock tolerance");ck(av_opt_set_double(resampler,"min_hard_comp",0.1,0),"Audio hard correction");ck(swr_init(resampler),"Audio converter init");fifo=av_audio_fifo_alloc(ae->sample_fmt,2,4096);
+  if(string(out->oformat->name)=="mp4" && num("split")==0)ck(av_opt_set(out->priv_data,"movflags","+faststart",0),"Enable MP4 fast start");
   if(num("networkPlayback") && string(out->oformat->name)=="matroska"){
    // Front Cues use reserved space only; never relocate media while recording.
    frontIndex=true;
@@ -162,7 +165,11 @@ class Recorder {
    if(a.offset==total){audioPendingBytes-=a.data.size();audioPending.pop_front();}else break;
   }
  }
- void finishSegment(){if(!out)return;if(ve){ck(avcodec_send_frame(ve,nullptr),"Drain video");packet(ve,vs);}drainResampler();audioFrames(true);if(ae){ck(avcodec_send_frame(ae,nullptr),"Drain audio");packet(ae,as);}trailerAttempted=true;ck(av_write_trailer(out),"Finalize container");avio_closep(&out->pb);avformat_free_context(out);out=nullptr;avcodec_free_context(&ve);avcodec_free_context(&ae);swr_free(&resampler);av_audio_fifo_free(fifo);fifo=nullptr;started=false;cout<<"SAVED "<<output<<endl;}
+ int writeTrailer(){
+  if(string(out->oformat->name)=="mp4" && num("split")==0)cout<<"FINALIZING_MP4 "<<output<<endl;
+  trailerAttempted=true;return av_write_trailer(out);
+ }
+ void finishSegment(){if(!out)return;if(ve){ck(avcodec_send_frame(ve,nullptr),"Drain video");packet(ve,vs);}drainResampler();audioFrames(true);if(ae){ck(avcodec_send_frame(ae,nullptr),"Drain audio");packet(ae,as);}ck(writeTrailer(),"Finalize container");avio_closep(&out->pb);if(string(out->oformat->name)=="mp4" && num("split")!=0)mp4Parts.push_back(output);avformat_free_context(out);out=nullptr;avcodec_free_context(&ve);avcodec_free_context(&ae);swr_free(&resampler);av_audio_fifo_free(fifo);fifo=nullptr;started=false;cout<<"SAVED "<<output<<endl;}
  bool recoverFilm()const{return !copy && opt("cadence")=="film32" && std::abs(av_q2d(sourceRate)/av_q2d(outputRate)-2.5)<0.015;}
  double filmDifference(AVFrame*f){
   std::vector<uint8_t> pixels;pixels.reserve(2304);
@@ -290,9 +297,32 @@ public:
   if(!started || trailerAttempted)return;
   audioPending.clear();audioPendingBytes=0;
   try{finishSegment();}catch(...){
-   if(out && out->pb && !trailerAttempted){trailerAttempted=true;if(av_write_trailer(out)>=0){avio_flush(out->pb);cout<<"SAVED "<<output<<endl;}}
+   if(out && out->pb && !trailerAttempted){if(writeTrailer()>=0){avio_flush(out->pb);cout<<"SAVED "<<output<<endl;}}
   }
  }
- void finish(){if(dec){ck(avcodec_send_packet(dec,nullptr),"Flush source decoder");receiveFrames();}emitFilm();if(!started)throw runtime_error("No video keyframe arrived");flushAudioUntil(INT64_MAX);finishSegment();}
+ void optimizeMP4Parts(){
+  // Run after capture has ended. Keep each original until its optimized copy
+  // is complete, then replace atomically; a failed optimization only warns.
+  for(const string&path:mp4Parts){
+   string temp,error;
+   try{
+    vector<char> pattern(path.begin(),path.end());const string suffix=".faststart-XXXXXX";pattern.insert(pattern.end(),suffix.begin(),suffix.end());pattern.push_back(0);
+    int fd=mkstemp(pattern.data());if(fd<0)throw runtime_error("Cannot create temporary MP4 optimization file");close(fd);temp=pattern.data();
+    cout<<"FINALIZING_MP4 "<<temp<<endl;
+    // FFmpeg's public-domain qt-faststart patches atom offsets and copies media
+    // unchanged; the capture-only libavformat build has no MOV demuxer.
+    char name[]="qt-faststart";
+    char*argv[]={name,const_cast<char*>(path.c_str()),const_cast<char*>(temp.c_str()),nullptr};
+    // Embedded: the parent's stall timeout cannot leave an orphan writer.
+    if(mp4_faststart_main(3,argv)!=0 || filesystem::file_size(temp)==0)throw runtime_error("MP4 optimizer did not complete");
+    if(rename(temp.c_str(),path.c_str())!=0)throw runtime_error("Cannot replace MP4 with optimized copy");
+    temp.clear();
+   }catch(const exception&e){error=e.what();}
+   if(!temp.empty())remove(temp.c_str());
+   if(!error.empty())warning("MP4 fast start could not finish; original playable part retained: "+error);
+   cout<<"SAVED "<<path<<endl;
+  }
+ }
+ void finish(){if(dec){ck(avcodec_send_packet(dec,nullptr),"Flush source decoder");receiveFrames();}emitFilm();if(!started)throw runtime_error("No video keyframe arrived");flushAudioUntil(INT64_MAX);finishSegment();optimizeMP4Parts();}
 };
 int main(int argc,char**argv){ios::sync_with_stdio(false);cin.tie(nullptr);av_log_set_level(AV_LOG_ERROR);try{for(int i=1;i<argc;++i){string a=argv[i];auto n=a.find('=');if(n!=string::npos)args[a.substr(0,n)]=a.substr(n+1);}Recorder r;try{Message m;bool end=false;while(readMessage(m)){if(m.type==3){end=true;break;}r.process(m);}if(!end)throw runtime_error("Helper input ended without finish");r.finish();return 0;}catch(...){r.salvage();throw;}}catch(const exception&e){cerr<<"ERROR "<<e.what()<<endl;return 1;}}

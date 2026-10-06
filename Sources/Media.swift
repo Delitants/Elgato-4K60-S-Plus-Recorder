@@ -181,6 +181,7 @@ final class MovieRecorder {
         if writer==nil {
             guard type==0xc1 && key,let vf=converter.videoFormat,let af=converter.audioFormat else{return}
             let w=try AVAssetWriter(outputURL:url,fileType:profile.container==0 ? .mov : .mp4)
+            if profile.container==1{w.shouldOptimizeForNetworkUse=true}
             let videoSettings=try profile.videoSettings(format:vf,frameRate:converter.frameTiming.rate?.fps)
             let v=AVAssetWriterInput(mediaType:.video,outputSettings:videoSettings,sourceFormatHint:profile.transcodes ? CMSampleBufferGetFormatDescription(sample) : vf)
             let a=AVAssetWriterInput(mediaType:.audio,outputSettings:profile.audioSettings,sourceFormatHint:af)

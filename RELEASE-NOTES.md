@@ -1,9 +1,9 @@
-# Elgato 4K60 S+ Recorder 0.6.10
+# Elgato 4K60 S+ Recorder 0.6.11
 
-Adds **Settings → Output → MKV network playback → Prefer seek index at front** for completed MKV recordings shared over DLNA/HTTP. Video and audio quality are unchanged; each split part gets its own index.
+MP4 output automatically places metadata before media for network playback. The FFmpeg helper uses `movflags=+faststart`; the native writer uses Apple's network optimization. MOV, MKV and MPEG-TS retain their previous behavior.
 
-The option is off by default and reserves 1 MiB per file. If its conservative index budget fills, recording continues with a warning and a standard end index, avoiding a full-file rewrite during Stop or splitting. No DLNA compatibility guarantee is made for an untested TV/server.
+MP4 split parts are optimized after Stop, keeping file relocation out of live capture. Allow temporary space for one part. Optimization preserves the original until successful replacement; failure warns and retains the playable original. Finalization tracks actual write progress instead of interrupting a large file after a fixed 30 seconds.
 
 Separate **macOS-Apple-Silicon.zip** and **macOS-Intel.zip** downloads. Requires macOS 26+. Ad-hoc signed, not notarized.
 
-[Windows repair command and network playback advice](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/NETWORK-PLAYBACK.md) · [Validation](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.10.md)
+[Playback guidance](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/NETWORK-PLAYBACK.md) · [Validation](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.11.md)

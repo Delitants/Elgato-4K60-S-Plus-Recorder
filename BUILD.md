@@ -119,3 +119,7 @@ python3 Tests/JitterCadenceIntegration.py "/path/to/Elgato Recorder.app/Contents
 ```
 
 MKV network playback layout, content preservation, split, salvage and bounded-index tests: `bash test-network-playback.sh /path/to/Elgato\ Recorder.app`.
+
+MP4 fast-start regression: `bash test-mp4-faststart.sh /path/to/Elgato\ Recorder.app`. Native AAC tests need access to the macOS encoder service. The embedded MP4 optimizer is built from the public-domain source in `Helpers/MP4`.
+
+The qt-faststart source is locally adapted to send diagnostics to stderr and check final buffered output errors before replacing a split file.

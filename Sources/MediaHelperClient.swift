@@ -18,17 +18,22 @@ final class MediaHelperClient {
   // QueueBudget bounds retained input while the sink drops to a keyframe.
   // Finish an in-flight IPC packet across a temporary stall: abandoning part
   // of its header/payload would corrupt the helper protocol on the next write.
-  let fd=input.fileHandleForWriting.fileDescriptor;let deadline=ProcessInfo.processInfo.systemUptime+30.0
+  let fd=input.fileHandleForWriting.fileDescriptor;var watchdog=BackendStallWatchdog(now:ProcessInfo.processInfo.systemUptime)
   try packet.withUnsafeBytes{raw in var offset=0
    while offset<raw.count {
     let n=Darwin.write(fd,raw.baseAddress!.advanced(by:offset),raw.count-offset)
     if n>0 {offset+=n;continue}
     if errno==EINTR{continue}
-    if errno==EAGAIN && ProcessInfo.processInfo.systemUptime<deadline{var p=pollfd(fd:fd,events:Int16(POLLOUT),revents:0);_ = poll(&p,1,10);continue}
+    if errno==EAGAIN && !watchdog.expired(now:ProcessInfo.processInfo.systemUptime,progress:finalizationProgress){var p=pollfd(fd:fd,events:Int16(POLLOUT),revents:0);_ = poll(&p,1,10);continue}
     writeFailed=true
     throw BackendWriteError(diagnostic:diagnostic.isEmpty ? "Encoder input stalled for 30 seconds or its pipe closed; attempted to finalize the partial recording.":diagnostic)
    }
   }
+ }
+ private func finalizationProgress()->String? {
+  guard profile.container==1,let path=BackendProgress.finalizingMP4(in:stdout?.text ?? "") else{return nil}
+  var info=stat();guard stat(path,&info)==0 else{return nil}
+  return "\(path)\u{0}\(info.st_size):\(info.st_mtimespec.tv_sec):\(info.st_mtimespec.tv_nsec)"
  }
  var warning:String?{stdout?.latestWarning}
  var diagnostic:String{stderr?.text ?? ""}
@@ -69,8 +74,8 @@ final class MediaHelperClient {
  func finish()throws -> URL {
   guard started else{throw RecorderError(message:"No video keyframe arrived")}
   var error:Error?;if !writeFailed{do{try message(3,0)}catch let e{error=e}};input.fileHandleForWriting.closeFile()
-  let deadline=ProcessInfo.processInfo.systemUptime+30
-  while process.isRunning && ProcessInfo.processInfo.systemUptime<deadline{Thread.sleep(forTimeInterval:0.02)}
+  var watchdog=BackendStallWatchdog(now:ProcessInfo.processInfo.systemUptime)
+  while process.isRunning && !watchdog.expired(now:ProcessInfo.processInfo.systemUptime,progress:finalizationProgress){Thread.sleep(forTimeInterval:0.02)}
   if process.isRunning{ProcessLifecycle.stop(process);throw RecorderError(message:"Recording backend timed out while finalizing")}
   // The process can exit before its final output callback. Require both EOFs.
   guard stdout?.waitForEOF()==true,stderr?.waitForEOF()==true else{throw RecorderError(message:"Recording backend output did not finish draining")}

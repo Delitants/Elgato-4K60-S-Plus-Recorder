@@ -102,3 +102,7 @@ and enqueues through the layer's sampleBufferRenderer.
 The product photograph and application screenshot in the README were supplied by
 the user for publication. They are presentation assets, not protocol evidence.
 Elgato/Corsair and NDI references do not imply endorsement.
+
+MP4 split-file fast start uses the public-domain [FFmpeg 8.1.2 qt-faststart utility](https://github.com/FFmpeg/FFmpeg/blob/n8.1.2/tools/qt-faststart.c) by Mike Melanson, preserved in `Helpers/MP4/qt-faststart.c` and embedded in `MediaHelper`. It patches MP4 chunk offsets and copies media without re-encoding.
+
+The qt-faststart source is locally adapted to send diagnostics to stderr and check final buffered output errors before replacing a split file.

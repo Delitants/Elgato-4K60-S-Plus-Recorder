@@ -49,7 +49,27 @@ final class ProcessOutput {
 
 /// Helper progress is newline-delimited; do not display a partial pipe read.
 enum BackendProgress {
+ static func finalizingMP4(in text:String)->String? {
+  guard let line=text.split(separator:"\n",omittingEmptySubsequences:false).dropLast().last(where:{$0.hasPrefix("FINALIZING_MP4 ") || $0.hasPrefix("SAVED ") || $0.hasPrefix("FILE ")}),line.hasPrefix("FINALIZING_MP4 ") else{return nil}
+  return String(line.dropFirst(15))
+ }
  static func warning(in text:String)->String? {
   text.split(separator:"\n",omittingEmptySubsequences:false).dropLast().last(where:{$0.hasPrefix("WARNING ")}).map{String($0.dropFirst(8))}
+ }
+}
+
+/// Keep the normal 30-second stall bound, but allow a file relocation that is
+/// still writing. The caller supplies file identity, size and modification time.
+struct BackendStallWatchdog {
+ private var deadline:Double,nextProbe:Double,previous:String?
+ init(now:Double){deadline=now+30;nextProbe=now}
+ mutating func expired(now:Double,progress:()->String?)->Bool{
+  if now>=nextProbe {
+   nextProbe=now+0.25
+   let token=progress()
+   if let token,token != previous{deadline=now+30}
+   previous=token
+  }
+  return now>=deadline
  }
 }

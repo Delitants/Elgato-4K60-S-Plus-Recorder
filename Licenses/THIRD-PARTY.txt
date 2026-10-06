@@ -1,4 +1,4 @@
-Elgato Recorder 0.4.0 component notices
+Elgato Recorder component notices
 
 Native application / USB initialization: GPL-2.0
 https://github.com/Saddytech/elgato4k60sp-linux
@@ -13,6 +13,10 @@ Standalone MediaHelper and FFmpeg 8.1.2: GPL-3.0-or-later
 https://ffmpeg.org — FFmpeg-GPL-3.0.txt
 FFmpeg configured with GPL/version3, libx264, libx265, SVT-AV1, Opus, and the native
 Apple multimedia frameworks. Matching dependency source accompanies the release.
+
+Embedded MP4 optimizer: FFmpeg 8.1.2 tools/qt-faststart.c, by Mike Melanson; public domain.
+Source and original notice: Helpers/MP4/qt-faststart.c.
+https://github.com/FFmpeg/FFmpeg/blob/n8.1.2/tools/qt-faststart.c
 
 x264: GPL-2.0-or-later — https://www.videolan.org/developers/x264.html
 ARM: r3222 b35605ace3ddf7c1a5d67a2eb553f034aef41d55, Homebrew recipe included.
@@ -38,3 +42,5 @@ The proprietary runtime is loaded only by the separate NDISender executable.
 
 Original Homebrew formulas are included in dependency-build-recipes. See
 BUILD.md and the release's corresponding-source archive for build instructions.
+
+The qt-faststart source is locally adapted to send diagnostics to stderr and check final buffered output errors before replacing a split file.

@@ -9,9 +9,10 @@ MEDIA_PREFIX="${MEDIA_PREFIX:-$(brew --prefix ffmpeg)}"
 USB_PREFIX="${USB_PREFIX:-$(brew --prefix libusb)}"
 export PKG_CONFIG_LIBDIR="$MEDIA_PREFIX/lib/pkgconfig"
 mkdir -p "$BUILD_DIR/module-cache" "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Frameworks" "$APP_DIR/Contents/Resources"
+clang -arch "$ARCH" -mmacosx-version-min=26.0 -O2 -Dmain=mp4_faststart_main -c Helpers/MP4/qt-faststart.c -o "$BUILD_DIR/MP4FastStart.o"
 clang++ -arch "$ARCH" -mmacosx-version-min=26.0 -std=c++17 -O2 -IHelpers/NDI/include Helpers/NDI/main.cpp -o "$APP_DIR/Contents/MacOS/NDISender"
 cp Dependencies/NDI/libndi.dylib "$APP_DIR/Contents/Frameworks/"
-clang++ -arch "$ARCH" -mmacosx-version-min=26.0 -std=c++17 -O2 Helpers/Media/main.cpp $(pkg-config --cflags --libs libavformat libavcodec libavutil libswscale libswresample) -o "$APP_DIR/Contents/MacOS/MediaHelper"
+clang++ -arch "$ARCH" -mmacosx-version-min=26.0 -std=c++17 -O2 Helpers/Media/main.cpp "$BUILD_DIR/MP4FastStart.o" $(pkg-config --cflags --libs libavformat libavcodec libavutil libswscale libswresample) -o "$APP_DIR/Contents/MacOS/MediaHelper"
 clang -arch "$ARCH" -O2 -Wall -Wextra -mmacosx-version-min=26.0 -I"$USB_PREFIX/include/libusb-1.0" -c Sources/USBBridge.c -o "$BUILD_DIR/USBBridge.o"
 xcrun swiftc -O -target "$ARCH-apple-macosx26.0" -module-cache-path "$BUILD_DIR/module-cache" -import-objc-header Sources/USBBridge.h Sources/Completion.swift Sources/NDIOutput.swift Sources/CaptureFanout.swift Sources/MediaHelperClient.swift Sources/RecordingSink.swift Sources/FrameTiming.swift Sources/Profiles.swift Sources/PacketParser.swift Sources/Media.swift Sources/Monitoring.swift Sources/CaptureEngine.swift Sources/Settings.swift Sources/App.swift "$BUILD_DIR/USBBridge.o" -L"$USB_PREFIX/lib" -lusb-1.0 -Xlinker -rpath -Xlinker @executable_path/../Frameworks -o "$APP_DIR/Contents/MacOS/ElgatoRecorder"
 if [ -f "$APP_DIR/Contents/Frameworks/libusb-1.0.0.dylib" ]; then chmod u+w "$APP_DIR/Contents/Frameworks/libusb-1.0.0.dylib"; fi
@@ -29,8 +30,8 @@ cat > "$APP_DIR/Contents/Info.plist" <<'PLIST'
 <key>CFBundleDisplayName</key><string>Elgato Recorder</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleIconFile</key><string>Recorder</string>
-<key>CFBundleShortVersionString</key><string>0.6.10</string>
-<key>CFBundleVersion</key><string>19</string>
+<key>CFBundleShortVersionString</key><string>0.6.11</string>
+<key>CFBundleVersion</key><string>20</string>
 <key>LSMinimumSystemVersion</key><string>26.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSHumanReadableCopyright</key><string>GPL-2.0. USB capture sequence adapted from Saddytech/elgato4k60sp-linux.</string>
