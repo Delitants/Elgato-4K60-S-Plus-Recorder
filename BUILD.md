@@ -117,3 +117,5 @@ The 0.5.0 cadence regression also checks decoded source-frame content under jitt
 ```sh
 python3 Tests/JitterCadenceIntegration.py "/path/to/Elgato Recorder.app/Contents/MacOS/MediaHelper"
 ```
+
+MKV network playback layout, content preservation, split, salvage and bounded-index tests: `bash test-network-playback.sh /path/to/Elgato\ Recorder.app`.

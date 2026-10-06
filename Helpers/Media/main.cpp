@@ -43,10 +43,25 @@ class Recorder {
  std::deque<double> carrierIntervals;bool filmCarrierValid=true,videoTimingWarning=false;
  int64_t lastWrittenVideoPTS=AV_NOPTS_VALUE;
  bool filmKey=false,trailerAttempted=false;
+ bool frontIndex=false;uint64_t indexEntries=0;
+ static constexpr int indexReserve=1048576;
  int recoveryCount=0;bool softClockWarning=false;
  int width=0,height=0; string output; bool copy; int64_t segmentStart=0,segmentPayloadBytes=0; bool splitPending=false,splitReady=false;
  static AVPixelFormat hardwareFormat(AVCodecContext*c,const AVPixelFormat*fmts){for(auto p=fmts;*p!=AV_PIX_FMT_NONE;++p)if(*p==AV_PIX_FMT_VIDEOTOOLBOX)return *p;return num("decoder")==1?AV_PIX_FMT_NONE:fmts[0];}
- void packet(AVCodecContext*c,AVStream*s){AVPacket*p=av_packet_alloc();while(true){int r=avcodec_receive_packet(c,p);if(r==AVERROR(EAGAIN)||r==AVERROR_EOF)break;ck(r,"Receive encoded packet");av_packet_rescale_ts(p,c->time_base,s->time_base);p->stream_index=s->index;segmentPayloadBytes+=p->size;ck(av_interleaved_write_frame(out,p),"Write packet");}av_packet_free(&p);}
+ void indexPacket(const AVPacket*p){
+  if(!frontIndex || p->stream_index!=vs->index || !(p->flags&AV_PKT_FLAG_KEY))return;
+  // This app writes one video and one audio track. FFmpeg 8 cues only video
+  // keyframes here. 128 bytes per entry plus 1 KiB covers the EBML integer,
+  // element and CRC overhead conservatively, even with 64-bit timestamps.
+  if(++indexEntries>(indexReserve-1024)/128){
+   // The reserved area remains a valid Void. FFmpeg's ordinary trailer path
+   // appends Cues instead, avoiding a full-file relocation during Stop/split.
+   ck(av_opt_set_int(out->priv_data,"reserve_index_space",0,0),"Use standard MKV seek index");
+   frontIndex=false;
+   warning("MKV seek index exceeded the safe front-index budget; saved a standard end index without rewriting media");
+  }
+ }
+ void packet(AVCodecContext*c,AVStream*s){AVPacket*p=av_packet_alloc();while(true){int r=avcodec_receive_packet(c,p);if(r==AVERROR(EAGAIN)||r==AVERROR_EOF)break;ck(r,"Receive encoded packet");av_packet_rescale_ts(p,c->time_base,s->time_base);p->stream_index=s->index;segmentPayloadBytes+=p->size;indexPacket(p);ck(av_interleaved_write_frame(out,p),"Write packet");}av_packet_free(&p);}
  void audioFrames(bool drain){if(!ae)return;int frameSize=ae->frame_size?ae->frame_size:1024;while(av_audio_fifo_size(fifo)>=frameSize || (drain&&av_audio_fifo_size(fifo)>0)){int n=min(frameSize,av_audio_fifo_size(fifo));AVFrame*f=av_frame_alloc();f->format=ae->sample_fmt;f->sample_rate=ae->sample_rate;av_channel_layout_copy(&f->ch_layout,&ae->ch_layout);f->nb_samples=n;ck(av_frame_get_buffer(f,0),"Audio frame");av_audio_fifo_read(fifo,(void**)f->data,n);f->pts=audioNext;audioNext+=n;ck(avcodec_send_frame(ae,f),"Encode audio");av_frame_free(&f);packet(ae,as);}}
  void configureRate(){
   if(sourceRate.num)return;
@@ -57,7 +72,7 @@ class Recorder {
   if(copy && av_cmp_q(outputRate,sourceRate)<0)throw runtime_error("FPS downsampling requires a video encoder; Original video cannot drop compressed frames");
  }
  void openOutput(AVFrame*source,int64_t pts){
-  origin=pts;segmentStart=pts;segmentPayloadBytes=0;audioNext=AV_NOPTS_VALUE;trailerAttempted=false;
+  frontIndex=false;indexEntries=0;origin=pts;segmentStart=pts;segmentPayloadBytes=0;audioNext=AV_NOPTS_VALUE;trailerAttempted=false;
   string path=opt("output");if(num("split")!=0){filesystem::path p(path);char suffix[32];snprintf(suffix,sizeof(suffix),"_part%03d",++part);path=(p.parent_path()/(p.stem().string()+suffix+p.extension().string())).string();}
   if(filesystem::exists(path))throw runtime_error("Output already exists: "+path);
   ck(avformat_alloc_output_context2(&out,nullptr,nullptr,path.c_str()),"Create container");output=path;
@@ -91,6 +106,12 @@ class Recorder {
   AVDictionary*ad=nullptr;if(ac=="libopus")av_dict_set(&ad,"vbr",opt("audioMode","on").c_str(),0);ck(avcodec_open2(ae,a,&ad),"Open audio encoder");av_dict_free(&ad);
   as=avformat_new_stream(out,nullptr);as->time_base=ae->time_base;ck(avcodec_parameters_from_context(as->codecpar,ae),"Audio output format");
   AVChannelLayout input=AV_CHANNEL_LAYOUT_STEREO;ck(swr_alloc_set_opts2(&resampler,&ae->ch_layout,ae->sample_fmt,48000,&input,AV_SAMPLE_FMT_S16,48000,0,nullptr),"Audio converter");ck(av_opt_set_double(resampler,"async",48,0),"Audio clock compensation");ck(av_opt_set_double(resampler,"min_comp",0.001,0),"Audio clock tolerance");ck(av_opt_set_double(resampler,"min_hard_comp",0.1,0),"Audio hard correction");ck(swr_init(resampler),"Audio converter init");fifo=av_audio_fifo_alloc(ae->sample_fmt,2,4096);
+  if(num("networkPlayback") && string(out->oformat->name)=="matroska"){
+   // Front Cues use reserved space only; never relocate media while recording.
+   frontIndex=true;
+   ck(av_opt_set_int(out->priv_data,"reserve_index_space",indexReserve,0),"Reserve MKV seek index");
+   ck(av_opt_set_int(out->priv_data,"cues_to_front",0,0),"Place MKV seek index first");
+  }
   ck(avio_open(&out->pb,path.c_str(),AVIO_FLAG_WRITE),"Open output file");ck(avformat_write_header(out,nullptr),"Write container header");started=true;cout<<"FILE "<<path<<endl;
  }
  void warning(const string&text){cout<<"WARNING "<<++recoveryCount<<" · "<<text<<endl;}
@@ -222,7 +243,7 @@ class Recorder {
   if(splitReady){flushAudioUntil(pts);finishSegment();splitPending=false;splitReady=false;key=true;}
   if(!started){if(!key){av_frame_free(&cpu);return;}openOutput(src,pts);}
   flushAudioUntil(pts);
-  if(copy){AVPacket*p=av_packet_clone(input);if(key)p->flags|=AV_PKT_FLAG_KEY;p->pts=p->dts=pts-origin;p->duration=av_rescale_q(1,av_inv_q(sourceRate),US);av_packet_rescale_ts(p,US,vs->time_base);p->stream_index=vs->index;segmentPayloadBytes+=p->size;ck(av_interleaved_write_frame(out,p),"Write original video");av_packet_free(&p);}
+  if(copy){AVPacket*p=av_packet_clone(input);if(key)p->flags|=AV_PKT_FLAG_KEY;p->pts=p->dts=pts-origin;p->duration=av_rescale_q(1,av_inv_q(sourceRate),US);av_packet_rescale_ts(p,US,vs->time_base);p->stream_index=vs->index;segmentPayloadBytes+=p->size;indexPacket(p);ck(av_interleaved_write_frame(out,p),"Write original video");av_packet_free(&p);}
   else {int flags=SWS_BICUBIC;string f=opt("filter");if(f=="bilinear")flags=SWS_BILINEAR;else if(f=="area")flags=SWS_AREA;else if(f=="lanczos")flags=SWS_LANCZOS;
    scaler=sws_getCachedContext(scaler,src->width,src->height,(AVPixelFormat)src->format,ve->width,ve->height,ve->pix_fmt,flags,nullptr,nullptr,nullptr);if(!scaler)throw runtime_error("Scaler unavailable");
    AVFrame*dst=av_frame_alloc();dst->format=ve->pix_fmt;dst->width=ve->width;dst->height=ve->height;ck(av_frame_get_buffer(dst,32),"Allocate video frame");sws_scale(scaler,src->data,src->linesize,0,src->height,dst->data,dst->linesize);av_frame_copy_props(dst,src);dst->pts=av_rescale_q(pts-origin,US,ve->time_base);dst->pict_type=AV_PICTURE_TYPE_NONE;

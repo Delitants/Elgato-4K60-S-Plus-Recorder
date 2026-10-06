@@ -1,26 +1,9 @@
-# Elgato 4K60 S+ Recorder 0.6.9
+# Elgato 4K60 S+ Recorder 0.6.10
 
-A recording queue stall no longer immediately ends the recording. The app warns,
-drains accepted packets within its existing 64 MiB input limit, and resumes at a
-video keyframe. Source timestamps preserve A/V alignment across any skipped
-section. The warning reports the backlog and skipped input packet count.
+Adds **Settings → Output → MKV network playback → Prefer seek index at front** for completed MKV recordings shared over DLNA/HTTP. Video and audio quality are unchanged; each split part gets its own index.
 
-The media helper now tolerates temporary pipe stalls without truncating a message.
-A helper that closes its pipe or blocks a write for 30 seconds still triggers
-best-effort partial-file finalization. Unrecoverable disk/codec errors and native
-AVAssetWriter backpressure can also stop recording.
+The option is off by default and reserves 1 MiB per file. If its conservative index budget fills, recording continues with a warning and a standard end index, avoiding a full-file rewrite during Stop or splitting. No DLNA compatibility guarantee is made for an untested TV/server.
 
-Timer editing disables text suggestion popups and supports Escape, Select All, and
-standard clipboard shortcuts. The Record button is more prominent and shows a red
-dot with red Stop Recording text while recording.
+Separate **macOS-Apple-Silicon.zip** and **macOS-Intel.zip** downloads. Requires macOS 26+. Ad-hoc signed, not notarized.
 
-Includes the window-close fix from 0.6.8 and timing recovery from 0.6.7.
-
-## Choose your Mac download
-
-- **macOS-Apple-Silicon.zip** — Macs with Apple M-series chips (arm64).
-- **macOS-Intel.zip** — Intel-based Macs (x86_64).
-
-Requires **macOS 26 or later**. Ad-hoc signed, not notarized. macOS only.
-
-[Validation details](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.9.md).
+[Windows repair command and network playback advice](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/NETWORK-PLAYBACK.md) · [Validation](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/blob/main/docs/VALIDATION-0.6.10.md)

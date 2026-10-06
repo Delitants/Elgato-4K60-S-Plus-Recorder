@@ -23,6 +23,7 @@ struct RecordingProfile:Codable {
     var videoProfile="auto", preset="auto"
     var spatialAQ=AQMode.auto, scalingFilter=ScalingFilter.bicubic
     var audioMode="vbr", compressionLevel=5
+    var mkvNetworkPlayback=false
     var splitMode=0, splitSeconds=600, splitMB=1024
     var ndiEnabled=false, ndiName="Elgato Recorder", ndiScale=1
     var fileExtension:String { ["mov","mp4","mkv","ts"][min(3,max(0,container))] }
@@ -83,7 +84,7 @@ struct RecordingProfile:Codable {
         try require((0...2).contains(ndiScale) && !ndiName.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,"Choose an NDI name and valid output resolution.")
     }
     init() {}
-    enum CodingKeys:String,CodingKey {case sourceFPS,outputFPS,capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,hardwareQuality,keyframeSeconds,bFrames,videoProfile,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
+    enum CodingKeys:String,CodingKey {case sourceFPS,outputFPS,capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,hardwareQuality,keyframeSeconds,bFrames,videoProfile,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,mkvNetworkPlayback,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
     init(from sourceDecoder:Decoder)throws {
         let c=try sourceDecoder.container(keyedBy:CodingKeys.self)
         sourceFPS=try c.decodeIfPresent(FrameRateChoice.self,forKey:.sourceFPS) ?? .source
@@ -110,6 +111,7 @@ struct RecordingProfile:Codable {
         scalingFilter=try c.decodeIfPresent(ScalingFilter.self,forKey:.scalingFilter) ?? scalingFilter
         audioMode=try c.decodeIfPresent(String.self,forKey:.audioMode) ?? audioMode
         compressionLevel=try c.decodeIfPresent(Int.self,forKey:.compressionLevel) ?? compressionLevel
+        mkvNetworkPlayback=try c.decodeIfPresent(Bool.self,forKey:.mkvNetworkPlayback) ?? false
         splitMode=try c.decodeIfPresent(Int.self,forKey:.splitMode) ?? splitMode
         splitSeconds=try c.decodeIfPresent(Int.self,forKey:.splitSeconds) ?? splitSeconds
         splitMB=try c.decodeIfPresent(Int.self,forKey:.splitMB) ?? splitMB

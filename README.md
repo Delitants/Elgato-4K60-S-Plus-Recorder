@@ -4,7 +4,7 @@ A native macOS app for recording HDMI video and stereo audio from the
 **Elgato Game Capture 4K60 S+ (20GAP9901)** over USB.
 Independent community software, not affiliated with Elgato or Corsair.
 
-**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.9** · macOS 26+
+**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.10** · macOS 26+
 
 ![Elgato Game Capture 4K60 S+](docs/images/elgato-4k60-s-plus.png)
 
@@ -78,3 +78,5 @@ The app is GPL-2.0; the media helper is GPL-3.0-or-later. The NDI runtime has
 separate proprietary terms. See [LICENSE](LICENSE), [component notices](Licenses/THIRD-PARTY.txt)
 and [NDI terms](Licenses/NDI-RUNTIME-TERMS.txt). NDI® is a registered trademark of
 Vizrt NDI AB; this project is not sponsored or endorsed by NDI.
+
+For MKV files shared over DLNA, use **Settings → Output → MKV network playback → Prefer seek index at front**. See [network playback](docs/NETWORK-PLAYBACK.md) for existing-file repair on Windows and compatibility limits.

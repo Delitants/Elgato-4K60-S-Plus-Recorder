@@ -4,6 +4,10 @@ import Foundation
   func invalid(_ p:RecordingProfile){do{try p.validate();fatalError("accepted invalid settings")}catch{}}
   let p=try JSONDecoder().decode(RecordingProfile.self,from:Data("{\"capture4K\":true,\"container\":0,\"audio\":1}".utf8))
   assert(p.capture4K && p.audio==1 && p.keyframeSeconds==0 && p.rateControl == .abr)
+  let network=try JSONDecoder().decode(RecordingProfile.self,from:Data("{\"container\":2,\"mkvNetworkPlayback\":true}".utf8))
+  let encoded=try JSONSerialization.jsonObject(with:JSONEncoder().encode(network)) as! [String:Any]
+  assert(encoded["mkvNetworkPlayback"] as? Bool == true,"Network playback choice must survive saved-profile round trips")
+  assert(!p.mkvNetworkPlayback,"Old profiles retain their existing layout")
   var q=p;q.container=2;q.codec=4;q.audio=3;try q.validate()
   q.audio=4;try q.validate();q.encoder=1;invalid(q);q.encoder=2
   q.container=3;invalid(q);q.codec=1;q.audio=1;try q.validate()
