@@ -21,6 +21,7 @@ extern "C" {
 #include <unistd.h>
 extern "C" int mp4_faststart_main(int argc,char **argv);
 #include "FilmCadence.h"
+#include "H264Level.h"
 using namespace std;
 static const AVRational US={1,1000000};
 static void ck(int r,const char*what){if(r<0){char e[256];av_strerror(r,e,sizeof(e));throw runtime_error(string(what)+": "+e);}}
@@ -43,7 +44,7 @@ class Recorder {
  std::vector<uint8_t> filmPrevious;int64_t filmOrigin=AV_NOPTS_VALUE,filmLastPTS=AV_NOPTS_VALUE;
  std::deque<double> carrierIntervals;bool filmCarrierValid=true,videoTimingWarning=false;
  int64_t lastWrittenVideoPTS=AV_NOPTS_VALUE;
- bool filmKey=false,trailerAttempted=false;
+ bool filmKey=false,trailerAttempted=false,levelVerified=false;
  vector<string> mp4Parts;
  bool frontIndex=false;uint64_t indexEntries=0;
  static constexpr int indexReserve=1048576;
@@ -63,7 +64,14 @@ class Recorder {
    warning("MKV seek index exceeded the safe front-index budget; saved a standard end index without rewriting media");
   }
  }
- void packet(AVCodecContext*c,AVStream*s){AVPacket*p=av_packet_alloc();while(true){int r=avcodec_receive_packet(c,p);if(r==AVERROR(EAGAIN)||r==AVERROR_EOF)break;ck(r,"Receive encoded packet");av_packet_rescale_ts(p,c->time_base,s->time_base);p->stream_index=s->index;segmentPayloadBytes+=p->size;indexPacket(p);ck(av_interleaved_write_frame(out,p),"Write packet");}av_packet_free(&p);}
+ void packet(AVCodecContext*c,AVStream*s){AVPacket*p=av_packet_alloc();while(true){int r=avcodec_receive_packet(c,p);if(r==AVERROR(EAGAIN)||r==AVERROR_EOF)break;ck(r,"Receive encoded packet");
+   if(c==ve && !levelVerified && opt("level","auto")!="auto"){
+    int actual=h264ConfigurationLevel(c->extradata,c->extradata_size);
+    if(actual<0)actual=h264ConfigurationLevel(p->data,p->size); // MPEG-TS uses in-band SPS.
+    if(actual!=h264LevelLimits(opt("level")).id){av_packet_free(&p);throw runtime_error("Encoder did not honor requested H.264 level "+opt("level")+". Choose another level or Software encoding.");}
+    levelVerified=true;
+   }
+   av_packet_rescale_ts(p,c->time_base,s->time_base);p->stream_index=s->index;segmentPayloadBytes+=p->size;indexPacket(p);ck(av_interleaved_write_frame(out,p),"Write packet");}av_packet_free(&p);}
  void audioFrames(bool drain){if(!ae)return;int frameSize=ae->frame_size?ae->frame_size:1024;while(av_audio_fifo_size(fifo)>=frameSize || (drain&&av_audio_fifo_size(fifo)>0)){int n=min(frameSize,av_audio_fifo_size(fifo));AVFrame*f=av_frame_alloc();f->format=ae->sample_fmt;f->sample_rate=ae->sample_rate;av_channel_layout_copy(&f->ch_layout,&ae->ch_layout);f->nb_samples=n;ck(av_frame_get_buffer(f,0),"Audio frame");av_audio_fifo_read(fifo,(void**)f->data,n);f->pts=audioNext;audioNext+=n;ck(avcodec_send_frame(ae,f),"Encode audio");av_frame_free(&f);packet(ae,as);}}
  void configureRate(){
   if(sourceRate.num)return;
@@ -74,7 +82,7 @@ class Recorder {
   if(copy && av_cmp_q(outputRate,sourceRate)<0)throw runtime_error("FPS downsampling requires a video encoder; Original video cannot drop compressed frames");
  }
  void openOutput(AVFrame*source,int64_t pts){
-  frontIndex=false;indexEntries=0;origin=pts;segmentStart=pts;segmentPayloadBytes=0;audioNext=AV_NOPTS_VALUE;trailerAttempted=false;
+  frontIndex=false;indexEntries=0;origin=pts;segmentStart=pts;segmentPayloadBytes=0;audioNext=AV_NOPTS_VALUE;trailerAttempted=false;levelVerified=false;
   string path=opt("output");if(num("split")!=0){filesystem::path p(path);char suffix[32];snprintf(suffix,sizeof(suffix),"_part%03d",++part);path=(p.parent_path()/(p.stem().string()+suffix+p.extension().string())).string();}
   if(filesystem::exists(path))throw runtime_error("Output already exists: "+path);
   ck(avformat_alloc_output_context2(&out,nullptr,nullptr,path.c_str()),"Create container");output=path;
@@ -98,6 +106,20 @@ class Recorder {
    if(rc=="crf")set("crf",opt("quality","23"));
    if(opt("preset","auto")!="auto")set("preset",opt("preset"));else if(codec=="libsvtav1")set("preset","10");else if(codec=="libx264"||codec=="libx265")set("preset","veryfast");
    string profile=opt("profile","auto");if(profile!="auto") {if(codec.find("prores")!=string::npos){map<string,string>p={{"proxy","0"},{"lt","1"},{"standard","2"},{"hq","3"}};set("profile",p.at(profile));}else set("profile",profile);}
+   if(opt("level","auto")!="auto"){
+    const auto level=h264LevelLimits(opt("level"));
+    // Auto profile is resolved consistently for an explicit compatibility level.
+    if(profile=="auto"){profile="high";set("profile",profile);}
+    validateH264Level(level,ve->width,ve->height,outputRate.num,outputRate.den,ve->bit_rate);
+    set("level",opt("level"));
+    // x264 presets can emit Main/Baseline even when High was requested.
+    // Use the common conservative limit rather than only tagging a higher profile.
+    const int factor=1000;
+    ve->rc_max_rate=int64_t(level.kbps)*factor;ve->rc_buffer_size=level.cpbKbits*factor;
+    // Bound x264 presets (including veryslow) to the level's DPB budget.
+    int frames=min(16,level.dpbMBs/(((ve->width+15)/16)*((ve->height+15)/16)));
+    ve->refs=min(3,max(1,frames-1));
+   }
    if(codec.find("videotoolbox")!=string::npos){set("realtime","1");set("allow_sw",(num("encoder")==1||rc=="cq")?"0":"1");set("spatial_aq",opt("aq","-1"));if(rc=="cbr")set("constant_bit_rate","1");}
    else if(codec=="libx264"||codec=="libx265") {string params;if(rc=="cbr"){ve->rc_max_rate=ve->bit_rate;ve->rc_min_rate=ve->bit_rate;ve->rc_buffer_size=int(ve->bit_rate);params="vbv-maxrate="+to_string(ve->bit_rate/1000)+":vbv-bufsize="+to_string(ve->bit_rate/1000);if(codec=="libx264")params+=":nal-hrd=cbr";}if(opt("aq","-1")!="-1"){if(!params.empty())params+=":";params+="aq-mode="+opt("aq");}if(!params.empty())set(codec=="libx264"?"x264-params":"x265-params",params);}
    ck(avcodec_open2(ve,c,&d),rc=="cq"?"Open hardware CQ encoder (no bitrate or software fallback)":"Open video encoder");if(av_dict_count(d)){string unknown=av_dict_get(d,"",nullptr,AV_DICT_IGNORE_SUFFIX)->key;av_dict_free(&d);throw runtime_error("Encoder did not accept option: "+unknown);}av_dict_free(&d);
@@ -260,6 +282,7 @@ class Recorder {
  void receiveFrames(){AVFrame*f=av_frame_alloc();int r;while((r=avcodec_receive_frame(dec,f))>=0){auto it=pending.find(f->pts);if(it==pending.end())throw runtime_error("Decoded timestamp has no source packet");videoFrame(f,f->pts,(f->flags&AV_FRAME_FLAG_KEY)!=0,it->second);av_packet_free(&it->second);pending.erase(it);av_frame_unref(f);}av_frame_free(&f);if(r!=AVERROR(EAGAIN)&&r!=AVERROR_EOF)ck(r,"Read decoded frame");}
 public:
  Recorder():copy(opt("video")=="copy"){
+  if(opt("level","auto")!="auto"){h264LevelLimits(opt("level"));if(opt("video")!="libx264" && opt("video")!="h264_videotoolbox")throw runtime_error("H.264 level requires an H.264 encoder; stream copy cannot change it.");}
   if(opt("rc")=="cq"){
    if((opt("video")!="h264_videotoolbox" && opt("video")!="hevc_videotoolbox") || num("encoder")==2)throw runtime_error("Hardware CQ requires a hardware H.264 or HEVC encoder");
    if(num("hardwareQuality",65)<0||num("hardwareQuality",65)>100)throw runtime_error("Hardware CQ quality must be 0-100");

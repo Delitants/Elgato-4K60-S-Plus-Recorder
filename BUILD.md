@@ -123,3 +123,5 @@ MKV network playback layout, content preservation, split, salvage and bounded-in
 MP4 fast-start regression: `bash test-mp4-faststart.sh /path/to/Elgato\ Recorder.app`. Native AAC tests need access to the macOS encoder service. The embedded MP4 optimizer is built from the public-domain source in `Helpers/MP4`.
 
 The qt-faststart source is locally adapted to send diagnostics to stderr and check final buffered output errors before replacing a split file.
+
+H.264 level checks: `bash test-h264-level.sh /path/to/Elgato\ Recorder.app`. These use short generated media and require access to macOS encoder services for hardware cases. Use `--software-only` as the second argument for software-only checks.

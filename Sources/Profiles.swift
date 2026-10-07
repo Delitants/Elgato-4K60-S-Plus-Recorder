@@ -21,13 +21,15 @@ struct RecordingProfile:Codable {
     var quality=23, keyframeSeconds=0, bFrames=0
     var hardwareQuality=65
     var videoProfile="auto", preset="auto"
+    var h264Level="auto"
+    static let h264Levels=["auto","3.0","3.1","3.2","4.0","4.1","4.2","5.0","5.1","5.2"]
     var spatialAQ=AQMode.auto, scalingFilter=ScalingFilter.bicubic
     var audioMode="vbr", compressionLevel=5
     var mkvNetworkPlayback=false
     var splitMode=0, splitSeconds=600, splitMB=1024
     var ndiEnabled=false, ndiName="Elgato Recorder", ndiScale=1
     var fileExtension:String { ["mov","mp4","mkv","ts"][min(3,max(0,container))] }
-    var usesHelper:Bool {(encoder==2 && transcodes) || sourceFPS != .source || outputFPS != .source || container>=2 || codec==4 || audio>=3 || rateControl != .abr || keyframeSeconds != 0 || bFrames != 0 || videoProfile != "auto" || preset != "auto" || spatialAQ != .auto || (scale != 0 && scalingFilter != .bicubic) || splitMode != 0}
+    var usesHelper:Bool {h264Level != "auto" || (encoder==2 && transcodes) || sourceFPS != .source || outputFPS != .source || container>=2 || codec==4 || audio>=3 || rateControl != .abr || keyframeSeconds != 0 || bFrames != 0 || videoProfile != "auto" || preset != "auto" || spatialAQ != .auto || (scale != 0 && scalingFilter != .bicubic) || splitMode != 0}
 
     static var hardwareCQBuildSupported:Bool {
         #if arch(arm64)
@@ -73,6 +75,8 @@ struct RecordingProfile:Codable {
         try require(videoProfile != "baseline" || bFrames==0,"Baseline H.264 cannot use B-frames.")
         let profiles=codec==1 ? ["auto","baseline","main","high"] : codec==2 ? ["auto","main","main10"] : codec==3 ? ["auto","proxy","lt","standard","hq"] : codec==4 ? ["auto","main"] : ["auto"]
         try require(profiles.contains(videoProfile),"Unsupported video profile for this codec.")
+        try require(Self.h264Levels.contains(h264Level),"Unknown H.264 level.")
+        try require(h264Level=="auto" || codec==1,"H.264 level requires H.264 encoding; Original video keeps its source level.")
         let presets=codec==4 ? ["auto"]+(0...13).map(String.init) : ["auto","ultrafast","superfast","veryfast","faster","fast","medium","slow","slower","veryslow"]
         try require(presets.contains(preset),"Unsupported compression preset.")
         try require(preset=="auto" || encoder==2 || codec==4,"Compression presets require software encoding.")
@@ -84,7 +88,7 @@ struct RecordingProfile:Codable {
         try require((0...2).contains(ndiScale) && !ndiName.trimmingCharacters(in:.whitespacesAndNewlines).isEmpty,"Choose an NDI name and valid output resolution.")
     }
     init() {}
-    enum CodingKeys:String,CodingKey {case sourceFPS,outputFPS,capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,hardwareQuality,keyframeSeconds,bFrames,videoProfile,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,mkvNetworkPlayback,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
+    enum CodingKeys:String,CodingKey {case sourceFPS,outputFPS,capture4K,captureHEVC,deviceMbps,container,codec,encoder,decoder,scale,videoMbps,audio,audioKbps,rateControl,quality,hardwareQuality,keyframeSeconds,bFrames,videoProfile,h264Level,preset,spatialAQ,scalingFilter,audioMode,compressionLevel,mkvNetworkPlayback,splitMode,splitSeconds,splitMB,ndiEnabled,ndiName,ndiScale}
     init(from sourceDecoder:Decoder)throws {
         let c=try sourceDecoder.container(keyedBy:CodingKeys.self)
         sourceFPS=try c.decodeIfPresent(FrameRateChoice.self,forKey:.sourceFPS) ?? .source
@@ -106,6 +110,7 @@ struct RecordingProfile:Codable {
         keyframeSeconds=try c.decodeIfPresent(Int.self,forKey:.keyframeSeconds) ?? keyframeSeconds
         bFrames=try c.decodeIfPresent(Int.self,forKey:.bFrames) ?? bFrames
         videoProfile=try c.decodeIfPresent(String.self,forKey:.videoProfile) ?? videoProfile
+        h264Level=try c.decodeIfPresent(String.self,forKey:.h264Level) ?? "auto"
         preset=try c.decodeIfPresent(String.self,forKey:.preset) ?? preset
         spatialAQ=try c.decodeIfPresent(AQMode.self,forKey:.spatialAQ) ?? spatialAQ
         scalingFilter=try c.decodeIfPresent(ScalingFilter.self,forKey:.scalingFilter) ?? scalingFilter

@@ -4,7 +4,7 @@ A native macOS app for recording HDMI video and stereo audio from the
 **Elgato Game Capture 4K60 S+ (20GAP9901)** over USB.
 Independent community software, not affiliated with Elgato or Corsair.
 
-**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.11** · macOS 26+
+**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.12** · macOS 26+
 
 ![Elgato Game Capture 4K60 S+](docs/images/elgato-4k60-s-plus.png)
 
@@ -82,3 +82,5 @@ Vizrt NDI AB; this project is not sponsored or endorsed by NDI.
 For MKV files shared over DLNA, use **Settings → Output → MKV network playback → Prefer seek index at front**. See [network playback](docs/NETWORK-PLAYBACK.md) for existing-file repair on Windows and compatibility limits.
 
 MP4 output automatically uses fast start. Split MP4 parts are optimized after Stop; allow temporary space for one part.
+
+For older H.264 players, choose **Settings → Video → H.264 level**. Auto is the default; explicit levels 3.0–5.2 are available when recording with H.264/AVC. Level 4.1 supports 1080p up to 30 fps; 1080p60 needs 4.2. A level choice does not guarantee DLNA seeking.
