@@ -9,3 +9,7 @@ xcrun swiftc -suppress-warnings -module-cache-path "$TEST_DIR/cache" Sources/Fra
 clang++ -std=c++17 Tests/H264LevelTests.cpp -o "$TEST_DIR/limits"
 "$TEST_DIR/limits"
 python3 Tests/H264LevelIntegration.py "$APP/Contents/MacOS/MediaHelper" "${@:2}"
+
+if [[ " $* " != *" --software-only "* ]]; then
+ python3 Tests/HardwareCQLevel.py "$APP/Contents/MacOS/MediaHelper"
+fi

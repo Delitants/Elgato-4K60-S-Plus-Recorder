@@ -4,7 +4,7 @@ A native macOS app for recording HDMI video and stereo audio from the
 **Elgato Game Capture 4K60 S+ (20GAP9901)** over USB.
 Independent community software, not affiliated with Elgato or Corsair.
 
-**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.12** · macOS 26+
+**[Download the latest release](https://github.com/Delitants/Elgato-4K60-S-Plus-Recorder/releases/latest)** · **Current: v0.6.13** · macOS 26+
 
 ![Elgato Game Capture 4K60 S+](docs/images/elgato-4k60-s-plus.png)
 

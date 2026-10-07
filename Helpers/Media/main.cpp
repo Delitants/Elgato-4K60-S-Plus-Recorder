@@ -115,7 +115,12 @@ class Recorder {
     // x264 presets can emit Main/Baseline even when High was requested.
     // Use the common conservative limit rather than only tagging a higher profile.
     const int factor=1000;
-    ve->rc_max_rate=int64_t(level.kbps)*factor;ve->rc_buffer_size=level.cpbKbits*factor;
+    // VideoToolbox DataRateLimits without AverageBitRate creates an implicit
+    // bitrate target and overrides CQ behavior. Let its ProfileLevel enforce
+    // the selected level in CQ; retain explicit VBV caps for other modes.
+    if(!(codec=="h264_videotoolbox" && rc=="cq")){
+     ve->rc_max_rate=int64_t(level.kbps)*factor;ve->rc_buffer_size=level.cpbKbits*factor;
+    }
     // Bound x264 presets (including veryslow) to the level's DPB budget.
     int frames=min(16,level.dpbMBs/(((ve->width+15)/16)*((ve->height+15)/16)));
     ve->refs=min(3,max(1,frames-1));
