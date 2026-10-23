@@ -1,0 +1,13 @@
+{
+  "schema": 1,
+  "repository": "Delitants/Elgato-4K60-S-Plus-Recorder",
+  "baseline": "d626f6a3dff18481edc18da03208ce2c5b346cdb",
+  "public_docs": [],
+  "public_data": [],
+  "release_assets": [
+    "Elgato-Recorder-*-Dependency-Sources.tar.gz",
+    "Elgato-Recorder-*-macOS-Apple-Silicon.zip",
+    "Elgato-Recorder-*-macOS-Intel.zip",
+    "SHA256SUMS-*.txt"
+  ]
+}
